@@ -9,11 +9,11 @@
     "mobile-app"
   ],
   "scripts": {
-    "dev:admin": "npm run dev --prefix admin-dashboard",
-    "dev:pos": "npm run dev --prefix pos-pwa",
+    "dev:admin": "vite admin-dashboard",
+    "dev:pos": "vite pos-pwa",
     "dev:mobile": "npm run start --prefix mobile-app",
-    "build:admin": "npx --prefix admin-dashboard vite build",
-    "build:pos": "npx --prefix pos-pwa vite build"
+    "build:admin": "vite build admin-dashboard",
+    "build:pos": "vite build pos-pwa"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.1",
