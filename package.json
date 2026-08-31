@@ -1,0 +1,29 @@
+{
+  "name": "ub-collection-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Multi-tenant Garments Wholesale ERP System Monorepo",
+  "workspaces": [
+    "admin-dashboard",
+    "pos-pwa",
+    "mobile-app"
+  ],
+  "scripts": {
+    "dev:admin": "npm --prefix admin-dashboard run dev",
+    "dev:pos": "npm --prefix pos-pwa run dev",
+    "dev:mobile": "npm --prefix mobile-app run start",
+    "build:admin": "npm --prefix admin-dashboard run build",
+    "build:pos": "npm --prefix pos-pwa run build"
+  },
+  "keywords": [
+    "multi-tenant",
+    "erp",
+    "garments",
+    "gents-suits",
+    "supabase",
+    "pwa",
+    "react-native"
+  ],
+  "author": "UB Collection Team",
+  "license": "UNLICENSED"
+}
