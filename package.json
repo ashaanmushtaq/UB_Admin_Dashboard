@@ -9,11 +9,11 @@
     "mobile-app"
   ],
   "scripts": {
-    "dev:admin": "npm --prefix admin-dashboard run dev",
-    "dev:pos": "npm --prefix pos-pwa run dev",
-    "dev:mobile": "npm --prefix mobile-app run start",
-    "build:admin": "npm --prefix admin-dashboard run build",
-    "build:pos": "npm --prefix pos-pwa run build"
+    "dev:admin": "cd admin-dashboard && npx vite",
+    "dev:pos": "cd pos-pwa && npx vite",
+    "dev:mobile": "cd mobile-app && npx expo start",
+    "build:admin": "cd admin-dashboard && npx vite build",
+    "build:pos": "cd pos-pwa && npx vite build"
   },
   "keywords": [
     "multi-tenant",
