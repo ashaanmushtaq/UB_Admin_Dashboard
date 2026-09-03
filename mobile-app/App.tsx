@@ -1,120 +1,110 @@
-import React, { useEffect, useState } from 'react';
-import { StyleSheet, Text, View, SafeAreaView, ActivityIndicator } from 'react-native';
-import { checkSupabaseConnection } from './src/lib/supabase';
+import React, { useState } from 'react';
+import {
+  StyleSheet, Text, View, SafeAreaView, TouchableOpacity, StatusBar,
+} from 'react-native';
+import { StageTaskScreen } from './src/screens/StageTaskScreen';
+import { DriverDispatchScreen } from './src/screens/DriverDispatchScreen';
+import { AttendanceScreen } from './src/screens/AttendanceScreen';
+import { MyBalanceScreen } from './src/screens/MyBalanceScreen';
+import type { StaffRole } from './src/lib/mobileService';
+
+type Tab = 'tasks' | 'attendance' | 'driver' | 'balance';
 
 export default function App() {
-  const [status, setStatus] = useState<{ loading: boolean; connected: boolean; message: string }>({
-    loading: true,
-    connected: false,
-    message: 'Testing Supabase connection from React Native...'
-  });
-
-  useEffect(() => {
-    checkSupabaseConnection().then(res => {
-      setStatus({
-        loading: false,
-        connected: res.connected,
-        message: res.message
-      });
-    });
-  }, []);
+  const [activeTab, setActiveTab] = useState<Tab>('tasks');
+  const [staffRole, setStaffRole] = useState<StaffRole>('cutting_master');
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.card}>
-        <Text style={styles.headerTitle}>UB Collection</Text>
-        <Text style={styles.subTitle}>Production Staff Mobile App</Text>
+      <StatusBar barStyle="light-content" backgroundColor="#0f172a" />
 
-        <View style={styles.statusBadge}>
-          {status.loading ? (
-            <ActivityIndicator size="small" color="#38bdf8" />
-          ) : (
-            <View style={[styles.dot, { backgroundColor: status.connected ? '#10b981' : '#ef4444' }]} />
-          )}
-          <Text style={[styles.statusText, { color: status.connected ? '#34d399' : '#f87171' }]}>
-            {status.loading ? 'Checking Supabase...' : status.connected ? 'Supabase Connected' : 'Supabase Config Ready'}
-          </Text>
+      {/* Role Picker Bar (Demo Staff Switcher) */}
+      <View style={styles.roleBar}>
+        <Text style={styles.roleBarLabel}>Worker Role:</Text>
+        <View style={styles.roleChips}>
+          {(['cutting_master', 'tailor', 'iron_presser', 'packing_staff', 'driver'] as StaffRole[]).map(r => (
+            <TouchableOpacity
+              key={r}
+              style={[styles.roleChip, staffRole === r && styles.roleChipActive]}
+              onPress={() => {
+                setStaffRole(r);
+                if (r === 'driver') setActiveTab('driver');
+                else if (activeTab === 'driver') setActiveTab('tasks');
+              }}
+            >
+              <Text style={[styles.roleChipText, staffRole === r && styles.roleChipTextActive]}>
+                {r.split('_')[0].toUpperCase()}
+              </Text>
+            </TouchableOpacity>
+          ))}
         </View>
+      </View>
 
-        <Text style={styles.messageText}>{status.message}</Text>
+      {/* Main Screen Content */}
+      <View style={styles.content}>
+        {activeTab === 'tasks' && <StageTaskScreen role={staffRole} />}
+        {activeTab === 'attendance' && <AttendanceScreen />}
+        {activeTab === 'driver' && <DriverDispatchScreen />}
+        {activeTab === 'balance' && <MyBalanceScreen />}
+      </View>
 
-        <View style={styles.infoBox}>
-          <Text style={styles.infoTitle}>Mobile App Scaffolding Complete</Text>
-          <Text style={styles.infoDesc}>
-            Configured for cutting masters, tailors, iron pressers, and packing staff work order updates.
-          </Text>
-        </View>
+      {/* Bottom Tab Bar Navigation */}
+      <View style={styles.tabBar}>
+        <TouchableOpacity
+          style={[styles.tabItem, activeTab === 'tasks' && styles.tabItemActive]}
+          onPress={() => setActiveTab('tasks')}
+        >
+          <Text style={styles.tabIcon}>⚙️</Text>
+          <Text style={[styles.tabLabel, activeTab === 'tasks' && styles.tabLabelActive]}>Tasks</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.tabItem, activeTab === 'attendance' && styles.tabItemActive]}
+          onPress={() => setActiveTab('attendance')}
+        >
+          <Text style={styles.tabIcon}>⏰</Text>
+          <Text style={[styles.tabLabel, activeTab === 'attendance' && styles.tabLabelActive]}>Shift</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.tabItem, activeTab === 'driver' && styles.tabItemActive]}
+          onPress={() => setActiveTab('driver')}
+        >
+          <Text style={styles.tabIcon}>🚚</Text>
+          <Text style={[styles.tabLabel, activeTab === 'driver' && styles.tabLabelActive]}>Dispatch</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.tabItem, activeTab === 'balance' && styles.tabItemActive]}
+          onPress={() => setActiveTab('balance')}
+        >
+          <Text style={styles.tabIcon}>💳</Text>
+          <Text style={[styles.tabLabel, activeTab === 'balance' && styles.tabLabelActive]}>My Dues</Text>
+        </TouchableOpacity>
       </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#0f172a',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 20,
+  container: { flex: 1, backgroundColor: '#090d16' },
+  roleBar: {
+    backgroundColor: '#0f172a', paddingHorizontal: 12, paddingVertical: 8,
+    borderBottomWidth: 1, borderColor: '#1e293b', flexDirection: 'row', alignItems: 'center', gap: 8,
   },
-  card: {
-    width: '100%',
-    backgroundColor: '#1e293b',
-    borderRadius: 12,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: '#334155',
+  roleBarLabel: { fontSize: 11, fontWeight: 'bold', color: '#94a3b8' },
+  roleChips: { flexDirection: 'row', gap: 4, flex: 1 },
+  roleChip: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, backgroundColor: '#1e293b', borderWidth: 1, borderColor: '#334155' },
+  roleChipActive: { backgroundColor: '#0284c7', borderColor: '#38bdf8' },
+  roleChipText: { fontSize: 10, color: '#94a3b8', fontWeight: 'bold' },
+  roleChipTextActive: { color: '#fff' },
+  content: { flex: 1 },
+  tabBar: {
+    flexDirection: 'row', backgroundColor: '#0f172a', borderTopWidth: 1, borderColor: '#1e293b', paddingVertical: 6,
   },
-  headerTitle: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: '#38bdf8',
-  },
-  subTitle: {
-    fontSize: 14,
-    color: '#94a3b8',
-    marginBottom: 16,
-  },
-  statusBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(30, 41, 59, 0.8)',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#475569',
-    marginBottom: 12,
-  },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginRight: 8,
-  },
-  statusText: {
-    fontSize: 13,
-    fontWeight: '600',
-    marginLeft: 6,
-  },
-  messageText: {
-    color: '#cbd5e1',
-    fontSize: 13,
-    marginBottom: 16,
-  },
-  infoBox: {
-    backgroundColor: '#090d16',
-    borderRadius: 8,
-    padding: 12,
-  },
-  infoTitle: {
-    color: '#e2e8f0',
-    fontSize: 14,
-    fontWeight: 'bold',
-    marginBottom: 4,
-  },
-  infoDesc: {
-    color: '#94a3b8',
-    fontSize: 12,
-  },
+  tabItem: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 4 },
+  tabItemActive: { opacity: 1 },
+  tabIcon: { fontSize: 18, marginBottom: 2 },
+  tabLabel: { fontSize: 11, color: '#64748b', fontWeight: '600' },
+  tabLabelActive: { color: '#38bdf8', fontWeight: 'bold' },
 });

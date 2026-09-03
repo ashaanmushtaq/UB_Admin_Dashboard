@@ -12,8 +12,8 @@
     "dev:admin": "vite admin-dashboard",
     "dev:pos": "vite pos-pwa",
     "dev:mobile": "npm run start --prefix mobile-app",
-    "build:admin": "vite build admin-dashboard",
-    "build:pos": "vite build pos-pwa"
+    "build:admin": "npm --prefix admin-dashboard run build",
+    "build:pos": "npm --prefix pos-pwa run build"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.1",

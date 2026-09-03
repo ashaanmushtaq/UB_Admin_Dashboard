@@ -27,9 +27,9 @@ export const checkSupabaseConnection = async (): Promise<{ connected: boolean; m
       };
     }
 
-    const { error } = await supabase.auth.getSession();
+    const { error } = await supabase.from('tenants').select('id').limit(1);
     if (error) {
-      return { connected: false, message: `Mobile Auth Ping Error: ${error.message}` };
+      return { connected: false, message: `Mobile DB Ping Error: ${error.message}` };
     }
 
     return {
