@@ -634,7 +634,7 @@ function CreateUserModal({ onClose, onSuccess }: { onClose: () => void; onSucces
     try {
       await createStaffUserAccount({
         email: form.email.trim(),
-        password: form.password || 'UBCollection123!',
+        password: form.password || 'Garments123!',
         full_name: form.full_name.trim(),
         role: form.role,
       });
@@ -654,7 +654,7 @@ function CreateUserModal({ onClose, onSuccess }: { onClose: () => void; onSucces
           </div>
           <div className="emp-field emp-field--full">
             <label htmlFor="user-email" className="emp-label">Staff Email Address *</label>
-            <input id="user-email" className="emp-input" type="email" required value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="tariq@ubcollection.com" />
+            <input id="user-email" className="emp-input" type="email" required value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="staff@shop.com" />
           </div>
           <div className="emp-field">
             <label htmlFor="user-role" className="emp-label">Assigned Role *</label>
@@ -666,7 +666,7 @@ function CreateUserModal({ onClose, onSuccess }: { onClose: () => void; onSucces
           </div>
           <div className="emp-field">
             <label htmlFor="user-pass" className="emp-label">Initial Password</label>
-            <input id="user-pass" className="emp-input" type="password" value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} placeholder="Default: UBCollection123!" />
+            <input id="user-pass" className="emp-input" type="password" value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} placeholder="Default: Garments123!" />
           </div>
         </div>
         <div className="emp-modal-footer">

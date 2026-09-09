@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import type { User } from '@supabase/supabase-js';
 import { signOut } from '../lib/auth';
-import type { UserProfile } from '../lib/auth';
+import type { UserProfile, TenantBranding } from '../lib/auth';
+import { supabase } from '../lib/supabase';
 import { SupplierLedgerPage } from './SupplierLedgerPage';
 import { EmployeePage } from './EmployeePage';
 import { ProductionPage } from './ProductionPage';
@@ -15,6 +16,7 @@ import './DashboardPage.css';
 interface DashboardPageProps {
   user: User;
   profile: UserProfile | null;
+  branding?: TenantBranding | null;
 }
 
 type ActivePage = 'home' | 'fabric-ledger' | 'employees' | 'production' | 'customer-ledger' | 'finance' | 'reports' | 'notifications' | 'opening-balances' | 'pos' | 'mobile-app';
@@ -44,10 +46,90 @@ const MODULES = [
   { id: 'mobile-app' as ActivePage,      label: 'Mobile App',       icon: '📱', status: 'live',    desc: 'React Native app for production staff floor management' },
 ];
 
-export function DashboardPage({ user, profile }: DashboardPageProps) {
+export function DashboardPage({ user, profile, branding }: DashboardPageProps) {
   const [activePage, setActivePage] = useState<ActivePage>('home');
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [tenantStatus, setTenantStatus] = useState<'loading' | 'active' | 'suspended' | 'expired'>('loading');
   const roleColor = ROLE_BADGE_COLORS[profile?.role ?? ''] ?? '#94a3b8';
+
+  const shopName = branding?.display_name || branding?.name || 'Wholesale ERP';
+
+  useEffect(() => {
+    document.title = `${shopName} · Admin Dashboard`;
+  }, [shopName]);
+
+  // ── Check tenant subscription status on mount ──
+  useEffect(() => {
+    if (!profile?.tenant_id) {
+      // Profile not yet loaded — wait
+      if (profile !== null) setTenantStatus('active'); // no profile = let RLS handle it
+      return;
+    }
+    supabase
+      .rpc('get_tenant_subscription', { p_tenant_id: profile.tenant_id })
+      .then(({ data }) => {
+        if (!data || !data.found) { setTenantStatus('active'); return; }
+        if (data.subscription_status === 'suspended') { setTenantStatus('suspended'); return; }
+        if (!data.is_effective_active) { setTenantStatus('expired'); return; }
+        setTenantStatus('active');
+      })
+      .catch(() => setTenantStatus('active')); // on error, let RLS block instead
+  }, [profile?.tenant_id]);
+
+  // ── Suspended / Expired gate ──
+  if (tenantStatus === 'loading') {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#090c14' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
+          <div style={{ width: 40, height: 40, border: '2px solid rgba(79,142,247,0.2)', borderTopColor: '#4f8ef7', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+          <p style={{ color: '#4e607d', fontSize: '0.875rem', fontFamily: 'Inter, sans-serif' }}>Loading…</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (tenantStatus === 'suspended' || tenantStatus === 'expired') {
+    return (
+      <div style={{
+        minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: '#060912', fontFamily: 'Inter, system-ui, sans-serif',
+      }}>
+        <div style={{
+          maxWidth: 480, width: '100%', margin: '0 1rem',
+          background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(239,68,68,0.25)',
+          borderRadius: 20, padding: '3rem 2.5rem', textAlign: 'center',
+        }}>
+          <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>
+            {tenantStatus === 'suspended' ? '🚫' : '⌛'}
+          </div>
+          <h1 style={{ fontSize: '1.4rem', fontWeight: 700, color: '#f87171', margin: '0 0 0.75rem' }}>
+            {tenantStatus === 'suspended' ? 'Account Suspended' : 'Subscription Expired'}
+          </h1>
+          <p style={{ color: '#94a3b8', lineHeight: 1.65, margin: '0 0 2rem' }}>
+            {tenantStatus === 'suspended'
+              ? 'Your shop account has been suspended by the platform administrator. Please contact support to resolve this.'
+              : 'Your subscription has expired. Please contact the platform administrator to renew your access.'}
+          </p>
+          <p style={{ fontSize: '0.8rem', color: '#475569', marginBottom: '1.5rem' }}>
+            Platform support: <strong style={{ color: '#64748b' }}>ashaan@platform.admin</strong>
+          </p>
+          <button
+            id="btn-suspended-signout"
+            onClick={() => signOut().catch(() => {})}
+            style={{
+              padding: '0.65rem 1.5rem', borderRadius: 10,
+              border: '1px solid rgba(255,255,255,0.1)',
+              background: 'rgba(255,255,255,0.05)', color: '#94a3b8',
+              fontSize: '0.875rem', cursor: 'pointer', fontFamily: 'inherit',
+            }}
+          >
+            Sign Out
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // Close sidebar on nav item click (mobile)
   function navigate(page: ActivePage) {
@@ -81,7 +163,7 @@ export function DashboardPage({ user, profile }: DashboardPageProps) {
         </button>
         <div className="dash-mobile-brand">
           <span className="dash-logo-box" aria-hidden="true">👑</span>
-          <span className="dash-sidebar-title" style={{ fontSize: '1rem' }}>UB COLLECTION</span>
+          <span className="dash-sidebar-title" style={{ fontSize: '1rem' }}>{shopName.toUpperCase()}</span>
         </div>
         <div className="dash-mobile-avatar" aria-hidden="true">
           {(profile?.full_name ?? user.email ?? '?')[0].toUpperCase()}
@@ -98,7 +180,7 @@ export function DashboardPage({ user, profile }: DashboardPageProps) {
         <div className="dash-sidebar-brand">
           <div className="dash-logo-box" aria-hidden="true">👑</div>
           <div className="dash-brand-text">
-            <div className="dash-sidebar-title">UB COLLECTION</div>
+            <div className="dash-sidebar-title">{shopName.toUpperCase()}</div>
             <div className="dash-sidebar-sub">Wholesale Garments ERP</div>
           </div>
         </div>

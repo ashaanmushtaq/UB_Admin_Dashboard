@@ -118,7 +118,7 @@ export async function createStaffUserAccount(payload: {
 }): Promise<void> {
   const { error } = await supabase.auth.signUp({
     email: payload.email,
-    password: payload.password || 'UBCollection123!',
+    password: payload.password || 'Garments123!',
     options: {
       data: {
         full_name: payload.full_name,

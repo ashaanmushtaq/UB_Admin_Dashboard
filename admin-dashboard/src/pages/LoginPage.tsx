@@ -73,8 +73,8 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
             </svg>
           </div>
           <div>
-            <h1 className="login-brand-name">UB Collection</h1>
-            <p className="login-brand-tagline">Admin Dashboard</p>
+            <h1 className="login-brand-name">Wholesale ERP</h1>
+            <p className="login-brand-tagline">Shop Management Portal</p>
           </div>
         </div>
 
@@ -88,7 +88,7 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
           </p>
 
           {connectionMsg && (
-            <div className="login-error" role="alert" id="login-error-msg">
+            <div className="login-error" role="alert" id="login-connection-msg">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <circle cx="8" cy="8" r="7" stroke="#f87171" strokeWidth="1.5"/>
                 <path d="M8 5v4M8 11v0.5" stroke="#f87171" strokeWidth="1.5" strokeLinecap="round"/>
@@ -108,7 +108,9 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
           )}
 
           <div className="login-field">
-            <label htmlFor="login-email" className="login-label">Email address</label>
+            <label htmlFor="login-email" className="login-label">
+              Email address
+            </label>
             <div className="login-input-wrap">
               <span className="login-input-icon" aria-hidden="true">
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
@@ -120,13 +122,12 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
                 id="login-email"
                 type="email"
                 className="login-input"
-                placeholder="owner@ubcollection.pk"
+                placeholder="owner@shop.com"
                 value={email}
                 onChange={e => setEmail(e.target.value)}
                 autoComplete="email"
                 required
                 disabled={loading}
-                aria-describedby={error ? 'login-error-msg' : undefined}
               />
             </div>
           </div>

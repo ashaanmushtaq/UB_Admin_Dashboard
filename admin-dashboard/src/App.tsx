@@ -1,18 +1,37 @@
 import { useEffect, useState, useRef } from 'react';
 import type { User } from '@supabase/supabase-js';
-import { onAuthStateChange, getProfile } from './lib/auth';
-import type { UserProfile } from './lib/auth';
+import { onAuthStateChange, getProfile, isSuperAdmin, getTenantBranding } from './lib/auth';
+import type { UserProfile, TenantBranding } from './lib/auth';
 import { supabase } from './lib/supabase';
 import { LoginPage } from './pages/LoginPage';
 import { DashboardPage } from './pages/DashboardPage';
+import { SuperAdminPage } from './pages/SuperAdminPage';
 
-type AuthState = 'loading' | 'unauthenticated' | 'authenticated';
+type AuthState = 'loading' | 'unauthenticated' | 'authenticated' | 'super_admin';
 
 export function App() {
   const [authState, setAuthState] = useState<AuthState>('loading');
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [branding, setBranding] = useState<TenantBranding | null>(null);
   const resolvedRef = useRef(false);
+
+  async function loadUserData(u: User) {
+    try {
+      const p = await getProfile(u);
+      setProfile(p);
+      if (p?.tenant_id) {
+        const b = await getTenantBranding(p.tenant_id);
+        setBranding(b);
+      } else {
+        setBranding(null);
+      }
+    } catch (err) {
+      console.warn('[Auth] loadUserData encountered error:', err);
+      setProfile(null);
+      setBranding(null);
+    }
+  }
 
   useEffect(() => {
     // ── Timeout safety net: if nothing resolves in 5s, show login ──
@@ -22,12 +41,13 @@ export function App() {
         resolvedRef.current = true;
         setUser(null);
         setProfile(null);
+        setBranding(null);
         setAuthState('unauthenticated');
       }
     }, 5000);
 
     // ── Step 1: Resolve initial session immediately (no waiting for change event) ──
-    supabase.auth.getSession().then(({ data: { session }, error }) => {
+    supabase.auth.getSession().then(async ({ data: { session }, error }) => {
       if (error) {
         console.warn('[Auth] getSession error:', error.message);
       }
@@ -36,11 +56,24 @@ export function App() {
         clearTimeout(timeoutId);
         if (session?.user) {
           setUser(session.user);
-          setAuthState('authenticated');
-          getProfile(session.user).then(p => setProfile(p));
+          try {
+            const isSuper = await isSuperAdmin().catch(() => false);
+            if (isSuper) {
+              setProfile(null);
+              setBranding(null);
+              setAuthState('super_admin');
+            } else {
+              await loadUserData(session.user);
+              setAuthState('authenticated');
+            }
+          } catch (err) {
+            console.warn('[Auth] Session resolution error:', err);
+            setAuthState('authenticated');
+          }
         } else {
           setUser(null);
           setProfile(null);
+          setBranding(null);
           setAuthState('unauthenticated');
         }
       }
@@ -54,14 +87,27 @@ export function App() {
     });
 
     // ── Step 2: Subscribe to subsequent auth state changes ──
-    const subscription = onAuthStateChange((u) => {
+    const subscription = onAuthStateChange(async (u) => {
       // After initial resolution, keep tracking sign-in / sign-out
       setUser(u);
       if (u) {
-        setAuthState('authenticated');
-        getProfile(u).then(p => setProfile(p));
+        try {
+          const isSuper = await isSuperAdmin().catch(() => false);
+          if (isSuper) {
+            setProfile(null);
+            setBranding(null);
+            setAuthState('super_admin');
+          } else {
+            await loadUserData(u);
+            setAuthState('authenticated');
+          }
+        } catch (err) {
+          console.warn('[Auth] onAuthStateChange resolution error:', err);
+          setAuthState('authenticated');
+        }
       } else {
         setProfile(null);
+        setBranding(null);
         setAuthState('unauthenticated');
       }
     });
@@ -77,10 +123,14 @@ export function App() {
   }
 
   if (authState === 'unauthenticated' || !user) {
-    return <LoginPage onSuccess={() => setAuthState('authenticated')} />;
+    return <LoginPage onSuccess={() => { /* auth state change listener handles routing */ }} />;
   }
 
-  return <DashboardPage user={user} profile={profile} />;
+  if (authState === 'super_admin') {
+    return <SuperAdminPage user={user} />;
+  }
+
+  return <DashboardPage user={user} profile={profile} branding={branding} />;
 }
 
 function SplashScreen() {
@@ -102,7 +152,7 @@ function SplashScreen() {
         }} />
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
         <p style={{ color: '#4e607d', fontSize: '0.875rem', fontFamily: 'Inter, sans-serif' }}>
-          Loading UB Collection…
+          Loading ERP Portal…
         </p>
       </div>
     </div>

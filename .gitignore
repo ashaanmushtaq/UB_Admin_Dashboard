@@ -26,9 +26,13 @@ logs/
 # Supabase Local Overrides
 backend/supabase/.branches/
 backend/supabase/.temp/
+supabase/.temp/
 
 # IDE & OS Files
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
+
+# Local-only tenant isolation test scripts
+tools/tenant-isolation/
