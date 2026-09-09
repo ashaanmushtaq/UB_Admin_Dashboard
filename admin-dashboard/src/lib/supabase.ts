@@ -17,8 +17,8 @@ export const checkSupabaseConnection = async (): Promise<{ connected: boolean; m
       };
     }
     
-    // Quick auth session or public table ping
-    const { error } = await supabase.auth.getUser();
+    // Quick auth session ping (works even when unauthenticated)
+    const { error } = await supabase.auth.getSession();
     if (error) {
       return { connected: false, message: `Connection test error: ${error.message}` };
     }

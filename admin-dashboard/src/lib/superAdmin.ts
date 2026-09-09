@@ -2,6 +2,19 @@ import { supabase } from './supabase';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+export type PaymentMethod = 'cash' | 'bank_transfer' | 'jazzcash' | 'easypaisa' | 'cheque' | 'other';
+
+export interface TenantPayment {
+  id: string;
+  tenant_id: string;
+  amount: number;
+  payment_method: PaymentMethod;
+  payment_date: string;
+  reference_no: string | null;
+  notes: string | null;
+  created_at: string;
+}
+
 export interface TenantRow {
   id: string;
   name: string;
@@ -16,6 +29,12 @@ export interface TenantRow {
   owner_id: string | null;
   owner_name: string | null;
   owner_email: string | null;
+  owner_phone: string | null;
+  address: string | null;
+  city: string | null;
+  notes: string | null;
+  total_paid: number;
+  latest_payment_date: string | null;
 }
 
 export interface CreateTenantPayload {
@@ -23,7 +42,16 @@ export interface CreateTenantPayload {
   owner_email: string;
   owner_password: string;
   owner_full_name: string;
+  owner_phone: string;
+  address: string;
+  city?: string;
+  notes?: string;
   plan_type: 'trial' | 'premium';
+  payment_amount: number;
+  payment_method: PaymentMethod;
+  payment_date: string;
+  payment_reference?: string;
+  payment_notes?: string;
 }
 
 export interface CreateTenantResult {
@@ -35,13 +63,19 @@ export interface CreateTenantResult {
     plan_type: string;
     subscription_status: string;
     subscription_end_date: string;
+    phone?: string | null;
+    address?: string | null;
+    city?: string | null;
+    notes?: string | null;
   };
   owner: {
     id: string;
     email: string;
     full_name: string;
+    phone?: string | null;
     role: string;
   };
+  payment?: TenantPayment;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -53,6 +87,47 @@ export async function listAllTenants(): Promise<TenantRow[]> {
   const { data, error } = await supabase.rpc('admin_list_tenants');
   if (error) throw new Error(error.message);
   return (data ?? []) as TenantRow[];
+}
+
+/**
+ * Fetch payment history for a tenant. Requires super_admin session.
+ */
+export async function listTenantPayments(tenantId: string): Promise<TenantPayment[]> {
+  const { data, error } = await supabase.rpc('admin_get_tenant_payments', {
+    p_tenant_id: tenantId,
+  });
+  if (error) throw new Error(error.message);
+  return (data ?? []) as TenantPayment[];
+}
+
+/**
+ * Record a subscription or renewal payment for a tenant.
+ */
+export async function recordTenantPayment(payload: {
+  tenant_id: string;
+  amount: number;
+  payment_method: PaymentMethod;
+  payment_date: string;
+  reference_no?: string;
+  notes?: string;
+}): Promise<TenantPayment> {
+  const { data: userData } = await supabase.auth.getUser();
+  const { data, error } = await supabase
+    .from('tenant_payments')
+    .insert({
+      tenant_id: payload.tenant_id,
+      amount: payload.amount,
+      payment_method: payload.payment_method,
+      payment_date: payload.payment_date,
+      reference_no: payload.reference_no || null,
+      notes: payload.notes || null,
+      recorded_by: userData.user?.id || null,
+    })
+    .select()
+    .single();
+
+  if (error) throw new Error(error.message);
+  return data as TenantPayment;
 }
 
 /**
@@ -81,25 +156,20 @@ export async function updateTenantSubscription(
  * profile atomically with rollback on failure.
  */
 export async function createTenant(payload: CreateTenantPayload): Promise<CreateTenantResult> {
-  const { data: sessionData } = await supabase.auth.getSession();
-  const token = sessionData.session?.access_token;
-  if (!token) throw new Error('Not authenticated');
-
-  const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL as string) || '';
-  const functionUrl = `${supabaseUrl}/functions/v1/provision-tenant`;
-
-  const res = await fetch(functionUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify(payload),
+  const { data, error } = await supabase.functions.invoke('provision-tenant', {
+    body: payload,
   });
 
-  const json = await res.json();
-  if (!res.ok || json.error) {
-    throw new Error(json.error || `HTTP ${res.status}`);
+  if (error) {
+    let errorMsg = error.message;
+    if ('context' in error && (error as any).context) {
+      try {
+        const body = await (error as any).context.json();
+        if (body?.error) errorMsg = body.error;
+      } catch (_) {}
+    }
+    throw new Error(errorMsg);
   }
-  return json as CreateTenantResult;
+
+  return data as CreateTenantResult;
 }

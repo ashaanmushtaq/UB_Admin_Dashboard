@@ -118,12 +118,32 @@ export function App() {
     };
   }, []);
 
+  async function handleLoginSuccess() {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        setUser(session.user);
+        const isSuper = await isSuperAdmin().catch(() => false);
+        if (isSuper) {
+          setProfile(null);
+          setBranding(null);
+          setAuthState('super_admin');
+        } else {
+          await loadUserData(session.user);
+          setAuthState('authenticated');
+        }
+      }
+    } catch (err) {
+      console.warn('[Auth] handleLoginSuccess error:', err);
+    }
+  }
+
   if (authState === 'loading') {
     return <SplashScreen />;
   }
 
   if (authState === 'unauthenticated' || !user) {
-    return <LoginPage onSuccess={() => { /* auth state change listener handles routing */ }} />;
+    return <LoginPage onSuccess={handleLoginSuccess} />;
   }
 
   if (authState === 'super_admin') {

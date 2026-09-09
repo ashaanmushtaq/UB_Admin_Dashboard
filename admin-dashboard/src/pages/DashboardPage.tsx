@@ -60,21 +60,58 @@ export function DashboardPage({ user, profile, branding }: DashboardPageProps) {
 
   // ── Check tenant subscription status on mount ──
   useEffect(() => {
+    let active = true;
+
+    // Safety timeout: never let tenantStatus hang on 'loading' indefinitely
+    const timer = setTimeout(() => {
+      if (active) setTenantStatus(prev => prev === 'loading' ? 'active' : prev);
+    }, 4000);
+
     if (!profile?.tenant_id) {
-      // Profile not yet loaded — wait
-      if (profile !== null) setTenantStatus('active'); // no profile = let RLS handle it
+      setTenantStatus('active');
+      clearTimeout(timer);
       return;
     }
+
     supabase
       .rpc('get_tenant_subscription', { p_tenant_id: profile.tenant_id })
       .then(({ data }) => {
+        if (!active) return;
+        clearTimeout(timer);
         if (!data || !data.found) { setTenantStatus('active'); return; }
         if (data.subscription_status === 'suspended') { setTenantStatus('suspended'); return; }
         if (!data.is_effective_active) { setTenantStatus('expired'); return; }
         setTenantStatus('active');
       })
-      .catch(() => setTenantStatus('active')); // on error, let RLS block instead
+      .catch(() => {
+        if (active) {
+          clearTimeout(timer);
+          setTenantStatus('active');
+        }
+      });
+
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
   }, [profile?.tenant_id]);
+
+  // Close sidebar on nav item click (mobile)
+  function navigate(page: ActivePage) {
+    setActivePage(page);
+    setSidebarOpen(false);
+  }
+
+  // Close sidebar on Escape key (hook must be called unconditionally before any early returns)
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') setSidebarOpen(false); };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, []);
+
+  async function handleSignOut() {
+    try { await signOut(); } catch (err) { console.error('Sign out error:', err); }
+  }
 
   // ── Suspended / Expired gate ──
   if (tenantStatus === 'loading') {
@@ -129,23 +166,6 @@ export function DashboardPage({ user, profile, branding }: DashboardPageProps) {
         </div>
       </div>
     );
-  }
-
-  // Close sidebar on nav item click (mobile)
-  function navigate(page: ActivePage) {
-    setActivePage(page);
-    setSidebarOpen(false);
-  }
-
-  // Close sidebar on Escape key
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') setSidebarOpen(false); };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, []);
-
-  async function handleSignOut() {
-    try { await signOut(); } catch (err) { console.error('Sign out error:', err); }
   }
 
   return (
