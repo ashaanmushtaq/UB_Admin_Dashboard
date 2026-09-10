@@ -1,6 +1,161 @@
 # UB Collection Wholesale ERP - Handoff Log
 
-> **Status**: Both `/pos-pwa` and `/admin-dashboard` fixes complete. Remote DB schema confirmed matching frontend expectations.
+> **Status**: Super Admin Tenant Editing — Full CRUD on all tenant fields (shop info, owner credentials, subscription) via `admin-update-tenant` Edge Function. DB guard trigger prevents non-super-admin writes to protected fields. Build: ✅ 108 modules.
+
+---
+
+## SESSION: Super Admin Tenant Editing (2026-09-10)
+
+### 1. Goal
+Allow Ashaan (super_admin) to edit any field on any tenant — shop name, display name, owner name/phone/email, password reset, subscription plan/status/dates, is_active flag, notes — from the Super Admin Panel.
+
+### 2. Edge Function: `admin-update-tenant`
+- **File**: `backend/supabase/functions/admin-update-tenant/index.ts`
+- Deployed to remote Supabase (`ertmvejppdcuyonbizxb`) — **ACTIVE** (version 1).
+- Verifies caller is `is_super_admin()` via JWT.
+- Updates `public.tenants` row with any subset of: `name`, `display_name`, `company_name`, `phone`, `address`, `city`, `notes`, `plan_type`, `subscription_status`, `subscription_start_date`, `subscription_end_date`, `is_active`.
+- Validates `plan_type` and `subscription_status` enum values.
+- Looks up tenant owner via `profiles.role = 'owner'`, updates `profiles.full_name` / `profiles.phone`.
+- Calls `admin.auth.admin.updateUserById()` to update actual Supabase Auth login email and/or password (not just display fields).
+- Returns `{ success, tenant, owner }`.
+
+### 3. Database Migrations
+- **`20260910000000_tenant_editing_and_subscription_guard.sql`**:
+  - Created `guard_tenant_updates()` trigger function — allows super admins to update all fields; blocks tenant owners from modifying subscription fields, slug, name, is_active, created_at.
+  - Attached as `trg_tenants_subscription_guard BEFORE UPDATE` on `public.tenants`.
+  - Updated `admin_list_tenants()` RPC to include `display_name` in the response.
+- **`20260910000001_fix_tenant_guard_service_role.sql`**:
+  - Extended the guard to allow `postgres`, `service_role`, `supabase_admin` roles to bypass restrictions (needed for Edge Function service_role key).
+- **`20260910000002_harden_tenant_guard_trigger.sql`**:
+  - Final hardened version: only restricts when `auth.uid() IS NOT NULL AND NOT is_super_admin()`. Backend service role (null uid) and super admins fully permitted. All non-super-admin restrictions enforced.
+- All 3 migrations confirmed: **Remote database is up to date** (`npx supabase db push` → `upToDate: true`).
+
+### 4. Frontend — `SuperAdminPage.tsx`
+- **`EditTenantModal`** component (lines 706–1109):
+  - 4-tab layout: 🏢 Shop & Branding | 👤 Owner & Credentials | 💳 Subscription & Status | 📝 Remarks & Notes.
+  - Tab 1 (Shop): Legal name, display name (with hint: "Appears on invoices, POS, dashboard"), company name, city, address, shop phone.
+  - Tab 2 (Owner): Full name, phone, login email (with ⚠️ auth warning), password reset (leave blank to keep unchanged).
+  - Tab 3 (Subscription): Plan type (Trial/Premium), subscription status (Active/Suspended/Expired), start/end dates, is_active checkbox. Live "X days remaining" counter.
+  - Tab 4 (Notes): Free-text operator notes.
+  - Validation: required fields, min 6-char password, cross-tab error tab auto-focus.
+  - Calls `updateTenant()` → `admin-update-tenant` Edge Function.
+- **`TenantTable`** actions cell: "✏️ Edit" button per row (`btn-edit-{id}`) → opens `EditTenantModal`.
+- **`TenantDetailModal`** footer: "✏️ Edit Tenant" button → closes detail, opens edit modal.
+
+### 5. Frontend — `superAdmin.ts`
+- `UpdateTenantPayload` interface with all editable fields.
+- `UpdateTenantResult` interface.
+- `updateTenant(payload)` → `supabase.functions.invoke('admin-update-tenant', { body: payload })` with robust error extraction.
+
+### 6. Build Verification
+```
+✓ 108 modules transformed.
+dist/assets/index-hv3zlnWU.css   91.92 kB │ gzip:  12.57 kB
+dist/assets/index-3LvcfDCi.js   551.37 kB │ gzip: 141.20 kB
+✓ built in 8.54s
+```
+
+### 7. Deployment Steps
+```bash
+# Edge Function already deployed (ACTIVE version 1)
+# DB migrations already pushed (upToDate: true)
+
+# Deploy admin-dashboard to Vercel (auto-deploys from git)
+git add .
+git commit -m "feat: Super Admin tenant editing — full field edit modal + admin-update-tenant Edge Function + guard trigger"
+git push origin master
+```
+
+---
+
+## SESSION: Super Admin Tenant Onboarding & Payment Tracking (2026-09-09)
+
+### 1. Requirements & Schema Additions
+- **Goal**: Expand Super Admin "Create New Tenant" form and tenant management with owner phone/WhatsApp, shop address/city, payment confirmation records, and remarks.
+- **Database Migrations (`20260909000002_add_tenant_payments_and_details.sql`)**:
+  - Added `city TEXT` and `notes TEXT` columns to `public.tenants` (complementing existing `address` and `phone`).
+  - Created `public.tenant_payments` table for recording subscription/renewal payments:
+    - `id UUID PRIMARY KEY`, `tenant_id UUID REFERENCES tenants`, `amount NUMERIC(12,2)`, `payment_method TEXT` (cash, bank_transfer, jazzcash, easypaisa, cheque, other), `payment_date DATE`, `reference_no TEXT`, `notes TEXT`, `recorded_by UUID REFERENCES profiles`, `created_at TIMESTAMPTZ`.
+    - Row-level security (RLS) enabled: Super admins have full access; tenant users can read their own tenant's payments.
+  - Replaced `admin_list_tenants()` RPC with enhanced version that computes `total_paid`, `latest_payment_date`, owner details (`owner_name`, `owner_email`, `owner_phone`), and returns `address`, `city`, `notes`.
+  - Added `admin_get_tenant_payments(p_tenant_id UUID)` RPC returning chronological payment history.
+
+### 2. Edge Function & Script Updates
+- **`backend/supabase/functions/provision-tenant/index.ts`**:
+  - Accepts new parameters: `owner_phone`, `address`, `city`, `notes`, `payment_amount`, `payment_method`, `payment_date`, `payment_reference`, `payment_notes`.
+  - Persists `address`, `city`, `phone`, and `notes` on `tenants`.
+  - Persists `phone` on `profiles`.
+  - Atomically creates initial payment record in `tenant_payments` during provisioning.
+  - Robust error handling and rollback compensation if provisioning fails.
+- **`tools/provision-tenant.mjs`**:
+  - Updated CLI tool to pass phone, address, city, and payment details.
+
+### 3. Frontend Implementation (`admin-dashboard`)
+- **`src/lib/superAdmin.ts`**:
+  - Added `TenantPayment`, `PaymentMethod`, and updated `CreateTenantPayload`, `TenantRow`, and `CreateTenantResult` interfaces.
+  - Added `listTenantPayments(tenantId)` helper invoking `admin_get_tenant_payments`.
+  - Added `recordTenantPayment` helper for recording future subscription renewal payments.
+- **`src/pages/SuperAdminPage.tsx`**:
+  - **CreateTenantForm**:
+    - Grouped into 4 visual sections: Shop Information, Owner & Credentials, Subscription & Payment Confirmation, and Notes & Remarks.
+    - Fields: Shop Name (required), City, Shop Address (required), Owner Name, Owner Phone/WhatsApp (required), Owner Email (required), Temp Password (required), Subscription Plan (Trial / Premium), Amount Received (defaults to plan amount), Payment Method (Cash, Bank Transfer, JazzCash, EasyPaisa, Cheque, Other), Payment Date (default today), Reference # (optional), Remarks (optional).
+    - Auto-adjusts payment amount when changing subscription plan.
+  - **TenantTable**:
+    - Columns: Shop (with City indicator), Owner & Contact (with click-to-chat WhatsApp link), Plan badge, Status badge, Total Paid (`Rs. X,XXX`), Subscription End (with days left badge), and Actions.
+    - Added "👁 Details" button to inspect full tenant profile and ledger.
+  - **TenantDetailModal**:
+    - Displays complete shop metadata, owner contact with WhatsApp integration, address & city, subscription validity dates, and notes.
+    - Fetches and displays complete payment history table with date, amount, method badge, reference number, and remarks.
+  - **Platform Stats**:
+    - Added "Total Revenue" card alongside Total Shops, Active, Premium, and Suspended/Expired.
+- **`src/pages/SuperAdminPage.css`**:
+  - Added styles for responsive dialogs, payment tables, method badges, WhatsApp quick links, and responsive grid layouts.
+
+---
+
+## SESSION: Auth Pipeline Resolution, Edge Function Fix & Tenant Provisioning (2026-09-09)
+
+### 1. Root Cause 1: Infinite Loading Screen on Login (`DashboardPage.tsx` & `App.tsx`)
+- **Root Cause**:
+  1. In `DashboardPage.tsx`, the `useEffect` checking tenant subscription checked `if (!profile?.tenant_id) { if (profile !== null) setTenantStatus('active'); return; }`. When `profile === null` (e.g. initial mount or null profile return), `if (profile !== null)` evaluated to `false`, leaving `tenantStatus` stuck on `'loading'` forever. The condition on line 80 (`if (tenantStatus === 'loading')`) rendered a permanent fullscreen spinner with zero errors.
+  2. In `admin-dashboard/src/lib/supabase.ts`, `checkSupabaseConnection()` called `supabase.auth.getUser()`, which throws `Auth session missing!` when unauthenticated, falsely displaying a connection error on the login screen.
+  4. In `DashboardPage.tsx`, an Escape-key `useEffect` was placed after the `if (tenantStatus === 'loading') return ...` and `if (tenantStatus === 'suspended' || tenantStatus === 'expired') return ...` early returns. On the first render (while `tenantStatus === 'loading'`), only 5 hooks executed; on the second render (once `tenantStatus === 'active'`), it bypassed the gates and executed the 6th hook, violating the React Rules of Hooks and crashing into the ErrorBoundary ("Rendered more hooks than during the previous render").
+- **Fix Applied**:
+  - `admin-dashboard/src/pages/DashboardPage.tsx`:
+    - Moved the Escape-key `useEffect` and helpers to the top of the component before ANY conditional returns, strictly adhering to React Rules of Hooks.
+    - Immediately unblocks to `setTenantStatus('active')` if `!profile?.tenant_id`.
+    - Added a 4-second safety timeout fallback preventing `tenantStatus === 'loading'` from ever hanging indefinitely.
+    - Cleaned up timers and active flags on unmount.
+  - `admin-dashboard/src/lib/supabase.ts`: Switched ping check from `getUser()` to `getSession()` so connection checks work cleanly when unauthenticated.
+  - `admin-dashboard/src/App.tsx`: Added `handleLoginSuccess` callback passed to `LoginPage.onSuccess` ensuring instant, deterministic auth state transition.
+
+### 2. Root Cause 2: Super Admin Tenant Creation Failing / Orphaned Tenants (`provision-tenant`)
+- **Root Cause**:
+  1. In `backend/supabase/functions/provision-tenant/index.ts` (line 126), the response object returned `full_name: displayName`. Variable `displayName` was never defined in scope (only `ownerName`, `shopDisplayName`, and `display_name` existed).
+  2. This triggered a `ReferenceError: displayName is not defined` after the tenant, auth user, and profile rows were created.
+  3. The error handler entered the rollback compensation block: `await admin.auth.admin.deleteUser(userId)` successfully deleted the owner auth user (cascading to the profile row).
+  4. The subsequent rollback step called `admin.from("tenants").delete().eq("id", tenantId).catch(...)`. Because the PostgREST query builder is a thenable without a native `.catch` before awaiting, it threw `TypeError: ...catch is not a function`, aborting tenant deletion.
+  5. The end result: The tenant row was persisted in `tenants`, but the auth user and profile were deleted during failed rollback. This left orphaned ghost tenants with no auth user and returned HTTP 500.
+- **Fix Applied**:
+  - `backend/supabase/functions/provision-tenant/index.ts`:
+    - Fixed line 126 from `displayName` to `ownerName`.
+    - Rewrote rollback compensation with separate, safe `try/catch` blocks around `admin.auth.admin.deleteUser` and `admin.from("tenants").delete().eq("id", tenantId)`.
+    - Redeployed function to remote Supabase via `npx supabase functions deploy provision-tenant --project-ref ertmvejppdcuyonbizxb`.
+    - Verified via live invocation: tenant + owner auth user + profile are created atomically and return HTTP 200.
+    - Tested immediate login with the newly-created owner credentials: confirmed 100% working.
+  - `admin-dashboard/src/lib/superAdmin.ts`: Replaced raw `fetch` call in `createTenant` with `supabase.functions.invoke('provision-tenant', { body: payload })`, ensuring standard SDK header handling and robust error message extraction.
+  - Cleaned up orphan test/ghost tenant rows from remote database.
+
+### 3. Verification of `profiles.role` Modeling
+- **Finding**:
+  - `profiles.role` is modeled uniformly as an `app_role` PostgreSQL enum type (`'owner'`, `'shop_staff'`, `'cutting_master'`, `'tailor'`, etc.).
+  - There are NO relational foreign key dependencies or relational queries like `role:roles(name)` in the frontend or backend. The `roles` table is solely an optional reference table. All frontend code correctly reads and writes string enum literals.
+
+### 4. Verified Account Credentials
+- `admin@ub.com` | `password123` (Owner - UB Collection Wholesale) ✅
+- `staff@ubcollection.com` | `password123` (Staff - UB Collection Wholesale) ✅
+- `usman@ub.com` | `UsmanShop2026!` (Owner - Usman Garments) ✅
+- `ashaan@platform.admin` | `AshaanSuperAdmin2026!` (Super Admin - Platform) ✅
 
 ---
 

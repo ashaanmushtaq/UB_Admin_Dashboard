@@ -5,11 +5,13 @@ import {
   listAllTenants,
   updateTenantSubscription,
   createTenant,
+  updateTenant,
   listTenantPayments,
 } from '../lib/superAdmin';
 import type {
   TenantRow,
   CreateTenantPayload,
+  UpdateTenantPayload,
   TenantPayment,
   PaymentMethod,
 } from '../lib/superAdmin';
@@ -493,9 +495,10 @@ function CreateTenantForm({ onSuccess }: { onSuccess: (msg: string) => void }) {
 interface TenantDetailModalProps {
   tenant: TenantRow;
   onClose: () => void;
+  onEdit: (tenant: TenantRow) => void;
 }
 
-function TenantDetailModal({ tenant, onClose }: TenantDetailModalProps) {
+function TenantDetailModal({ tenant, onClose, onEdit }: TenantDetailModalProps) {
   const [payments, setPayments] = useState<TenantPayment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -679,12 +682,427 @@ function TenantDetailModal({ tenant, onClose }: TenantDetailModalProps) {
           )}
         </div>
 
-        {/* Close Button */}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1.5rem' }}>
+        {/* Actions */}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1.5rem', gap: '0.75rem' }}>
+          <button
+            type="button"
+            className="sa-btn-edit"
+            onClick={() => {
+              onClose();
+              onEdit(tenant);
+            }}
+          >
+            ✏️ Edit Tenant
+          </button>
           <button className="sa-btn-secondary" onClick={onClose}>
             Close
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Edit Tenant Modal ────────────────────────────────────────────────────────
+
+interface EditTenantModalProps {
+  tenant: TenantRow;
+  onClose: () => void;
+  onSaved: (msg: string) => void;
+}
+
+function EditTenantModal({ tenant, onClose, onSaved }: EditTenantModalProps) {
+  const [name, setName] = useState(tenant.name);
+  const [displayName, setDisplayName] = useState(tenant.display_name || tenant.name);
+  const [companyName, setCompanyName] = useState(tenant.company_name || '');
+  const [city, setCity] = useState(tenant.city || '');
+  const [address, setAddress] = useState(tenant.address || '');
+  const [phone, setPhone] = useState(tenant.owner_phone || '');
+
+  const [ownerFullName, setOwnerFullName] = useState(tenant.owner_name || '');
+  const [ownerPhone, setOwnerPhone] = useState(tenant.owner_phone || '');
+  const [ownerEmail, setOwnerEmail] = useState(tenant.owner_email || '');
+  const [ownerPassword, setOwnerPassword] = useState('');
+
+  const [planType, setPlanType] = useState<'trial' | 'premium'>(tenant.plan_type);
+  const [subscriptionStatus, setSubscriptionStatus] = useState<'active' | 'suspended' | 'expired'>(tenant.subscription_status);
+  const [startDate, setStartDate] = useState(
+    tenant.subscription_start_date ? tenant.subscription_start_date.split('T')[0] : ''
+  );
+  const [endDate, setEndDate] = useState(
+    tenant.subscription_end_date ? tenant.subscription_end_date.split('T')[0] : ''
+  );
+  const [isActive, setIsActive] = useState(tenant.is_effective_active);
+  const [notes, setNotes] = useState(tenant.notes || '');
+
+  const [activeTab, setActiveTab] = useState<'shop' | 'owner' | 'subscription' | 'notes'>('shop');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+
+    if (!name.trim()) { setError('Shop registered name is required'); setActiveTab('shop'); return; }
+    if (!displayName.trim()) { setError('Shop display name is required'); setActiveTab('shop'); return; }
+    if (!address.trim()) { setError('Shop address is required'); setActiveTab('shop'); return; }
+    if (!ownerFullName.trim()) { setError('Owner full name is required'); setActiveTab('owner'); return; }
+    if (!ownerEmail.trim()) { setError('Owner email is required'); setActiveTab('owner'); return; }
+    if (!endDate) { setError('Subscription end date is required'); setActiveTab('subscription'); return; }
+    if (ownerPassword && ownerPassword.trim().length > 0 && ownerPassword.trim().length < 6) {
+      setError('Owner new password must be at least 6 characters');
+      setActiveTab('owner');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const payload: UpdateTenantPayload = {
+        tenant_id: tenant.id,
+        name: name.trim(),
+        display_name: displayName.trim(),
+        company_name: companyName.trim() || name.trim(),
+        city: city.trim(),
+        address: address.trim(),
+        phone: phone.trim() || ownerPhone.trim(),
+        owner_id: tenant.owner_id || undefined,
+        owner_full_name: ownerFullName.trim(),
+        owner_phone: ownerPhone.trim(),
+        owner_email: ownerEmail.trim(),
+        plan_type: planType,
+        subscription_status: subscriptionStatus,
+        subscription_start_date: startDate ? new Date(startDate).toISOString() : undefined,
+        subscription_end_date: new Date(endDate + 'T23:59:59Z').toISOString(),
+        is_active: isActive,
+        notes: notes.trim(),
+      };
+      if (ownerPassword.trim().length > 0) {
+        payload.owner_password = ownerPassword.trim();
+      }
+
+      await updateTenant(payload);
+      onSaved(`Tenant "${name}" successfully updated.`);
+      onClose();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="sa-dialog-overlay" onClick={onClose}>
+      <div className="sa-edit-dialog" onClick={e => e.stopPropagation()}>
+        <div className="sa-detail-header">
+          <div className="sa-detail-title-group">
+            <h2 className="sa-detail-shop-name">✏️ Edit Tenant: {tenant.name}</h2>
+            <div style={{ fontSize: '0.8rem', color: '#94a3b8' }}>
+              Slug: <code>{tenant.slug}</code> • ID: <code>{tenant.id.slice(0, 8)}…</code>
+            </div>
+          </div>
+          <button className="sa-close-btn" onClick={onClose} aria-label="Close modal">✕</button>
+        </div>
+
+        {error && (
+          <div className="sa-error" style={{ marginBottom: '1rem' }}>
+            <span>⚠</span> {error}
+          </div>
+        )}
+
+        {/* Tab Navigation */}
+        <div className="sa-edit-tabs" role="tablist">
+          <button
+            type="button"
+            className={`sa-edit-tab${activeTab === 'shop' ? ' sa-edit-tab--active' : ''}`}
+            onClick={() => setActiveTab('shop')}
+          >
+            🏢 Shop & Branding
+          </button>
+          <button
+            type="button"
+            className={`sa-edit-tab${activeTab === 'owner' ? ' sa-edit-tab--active' : ''}`}
+            onClick={() => setActiveTab('owner')}
+          >
+            👤 Owner & Credentials
+          </button>
+          <button
+            type="button"
+            className={`sa-edit-tab${activeTab === 'subscription' ? ' sa-edit-tab--active' : ''}`}
+            onClick={() => setActiveTab('subscription')}
+          >
+            💳 Subscription & Status
+          </button>
+          <button
+            type="button"
+            className={`sa-edit-tab${activeTab === 'notes' ? ' sa-edit-tab--active' : ''}`}
+            onClick={() => setActiveTab('notes')}
+          >
+            📝 Remarks & Notes
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit}>
+          {/* TAB 1: Shop & Branding */}
+          {activeTab === 'shop' && (
+            <div className="sa-form" style={{ padding: 0 }}>
+              <div className="sa-form-group">
+                <label className="sa-label sa-label-required" htmlFor="edit-name">
+                  Shop Legal / Registered Name
+                </label>
+                <input
+                  id="edit-name"
+                  className="sa-input"
+                  type="text"
+                  value={name}
+                  onChange={e => setName(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="sa-form-group">
+                <label className="sa-label sa-label-required" htmlFor="edit-display-name">
+                  Shop Display Name (Branding)
+                </label>
+                <input
+                  id="edit-display-name"
+                  className="sa-input"
+                  type="text"
+                  value={displayName}
+                  onChange={e => setDisplayName(e.target.value)}
+                  required
+                />
+                <div className="sa-input-hint">
+                  Appears on invoices, POS counter, and dashboard header
+                </div>
+              </div>
+
+              <div className="sa-form-group">
+                <label className="sa-label" htmlFor="edit-company-name">
+                  Company / Organization Name
+                </label>
+                <input
+                  id="edit-company-name"
+                  className="sa-input"
+                  type="text"
+                  value={companyName}
+                  onChange={e => setCompanyName(e.target.value)}
+                />
+              </div>
+
+              <div className="sa-form-group">
+                <label className="sa-label" htmlFor="edit-city">
+                  City
+                </label>
+                <input
+                  id="edit-city"
+                  className="sa-input"
+                  type="text"
+                  value={city}
+                  onChange={e => setCity(e.target.value)}
+                />
+              </div>
+
+              <div className="sa-form-group sa-form-full">
+                <label className="sa-label sa-label-required" htmlFor="edit-address">
+                  Shop Address
+                </label>
+                <input
+                  id="edit-address"
+                  className="sa-input"
+                  type="text"
+                  value={address}
+                  onChange={e => setAddress(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="sa-form-group">
+                <label className="sa-label" htmlFor="edit-shop-phone">
+                  Shop / Landline Phone
+                </label>
+                <input
+                  id="edit-shop-phone"
+                  className="sa-input"
+                  type="text"
+                  value={phone}
+                  onChange={e => setPhone(e.target.value)}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* TAB 2: Owner & Credentials */}
+          {activeTab === 'owner' && (
+            <div className="sa-form" style={{ padding: 0 }}>
+              <div className="sa-form-group">
+                <label className="sa-label sa-label-required" htmlFor="edit-owner-name">
+                  Owner Full Name
+                </label>
+                <input
+                  id="edit-owner-name"
+                  className="sa-input"
+                  type="text"
+                  value={ownerFullName}
+                  onChange={e => setOwnerFullName(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="sa-form-group">
+                <label className="sa-label sa-label-required" htmlFor="edit-owner-phone">
+                  Owner Phone / WhatsApp
+                </label>
+                <input
+                  id="edit-owner-phone"
+                  className="sa-input"
+                  type="text"
+                  value={ownerPhone}
+                  onChange={e => setOwnerPhone(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="sa-form-group">
+                <label className="sa-label sa-label-required" htmlFor="edit-owner-email">
+                  Owner Login Email
+                </label>
+                <input
+                  id="edit-owner-email"
+                  className="sa-input"
+                  type="email"
+                  value={ownerEmail}
+                  onChange={e => setOwnerEmail(e.target.value)}
+                  required
+                />
+                <div className="sa-input-hint sa-input-hint--warning">
+                  ⚠️ Updating this modifies the owner's actual Supabase Auth login email.
+                </div>
+              </div>
+
+              <div className="sa-form-group">
+                <label className="sa-label" htmlFor="edit-owner-password">
+                  Reset Owner Password
+                </label>
+                <input
+                  id="edit-owner-password"
+                  className="sa-input"
+                  type="password"
+                  placeholder="Leave blank to keep unchanged"
+                  value={ownerPassword}
+                  onChange={e => setOwnerPassword(e.target.value)}
+                />
+                <div className="sa-input-hint">
+                  Only fill this if you want to reset the owner's password (min 6 characters).
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 3: Subscription & Status */}
+          {activeTab === 'subscription' && (
+            <div className="sa-form" style={{ padding: 0 }}>
+              <div className="sa-form-group">
+                <label className="sa-label" htmlFor="edit-plan-type">
+                  Subscription Plan
+                </label>
+                <select
+                  id="edit-plan-type"
+                  className="sa-select"
+                  value={planType}
+                  onChange={e => setPlanType(e.target.value as 'trial' | 'premium')}
+                >
+                  <option value="trial">Trial — Rs. 5,000 / 30 days</option>
+                  <option value="premium">Premium — Rs. 50,000 / 12 months</option>
+                </select>
+              </div>
+
+              <div className="sa-form-group">
+                <label className="sa-label" htmlFor="edit-sub-status">
+                  Subscription Status
+                </label>
+                <select
+                  id="edit-sub-status"
+                  className="sa-select"
+                  value={subscriptionStatus}
+                  onChange={e => setSubscriptionStatus(e.target.value as 'active' | 'suspended' | 'expired')}
+                >
+                  <option value="active">Active (Normal Access)</option>
+                  <option value="suspended">Suspended (Access Blocked)</option>
+                  <option value="expired">Expired (Requires Renewal)</option>
+                </select>
+              </div>
+
+              <div className="sa-form-group">
+                <label className="sa-label" htmlFor="edit-start-date">
+                  Subscription Start Date
+                </label>
+                <input
+                  id="edit-start-date"
+                  className="sa-input"
+                  type="date"
+                  value={startDate}
+                  onChange={e => setStartDate(e.target.value)}
+                />
+              </div>
+
+              <div className="sa-form-group">
+                <label className="sa-label sa-label-required" htmlFor="edit-end-date">
+                  Subscription End Date
+                </label>
+                <input
+                  id="edit-end-date"
+                  className="sa-input"
+                  type="date"
+                  value={endDate}
+                  onChange={e => setEndDate(e.target.value)}
+                  required
+                />
+                <div className="sa-input-hint">
+                  Current validity: {endDate ? `${daysUntil(endDate)} days remaining` : '—'}
+                </div>
+              </div>
+
+              <div className="sa-form-group sa-form-full" style={{ marginTop: '0.5rem' }}>
+                <label className="sa-checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={isActive}
+                    onChange={e => setIsActive(e.target.checked)}
+                  />
+                  <span>Account Enabled (is_active)</span>
+                </label>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 4: Remarks & Notes */}
+          {activeTab === 'notes' && (
+            <div className="sa-form" style={{ padding: 0 }}>
+              <div className="sa-form-group sa-form-full">
+                <label className="sa-label" htmlFor="edit-notes">
+                  Operator Setup & Agreement Notes
+                </label>
+                <textarea
+                  id="edit-notes"
+                  className="sa-textarea"
+                  rows={5}
+                  placeholder="e.g. Onboarded via WhatsApp. Paid cash advance. Special discount on renewals."
+                  value={notes}
+                  onChange={e => setNotes(e.target.value)}
+                />
+              </div>
+            </div>
+          )}
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.5rem', paddingTop: '1rem', borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+            <button type="button" className="sa-btn-secondary" onClick={onClose} disabled={loading}>
+              Cancel
+            </button>
+            <button type="submit" className="sa-btn-primary" disabled={loading}>
+              {loading ? 'Saving Changes…' : '💾 Save Changes'}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );
@@ -697,9 +1115,10 @@ interface TenantTableProps {
   onAction: (tenant: TenantRow, action: 'suspend' | 'reactivate') => void;
   pendingId: string | null;
   onViewDetails: (tenant: TenantRow) => void;
+  onEdit: (tenant: TenantRow) => void;
 }
 
-function TenantTable({ tenants, onAction, pendingId, onViewDetails }: TenantTableProps) {
+function TenantTable({ tenants, onAction, pendingId, onViewDetails, onEdit }: TenantTableProps) {
   if (tenants.length === 0) {
     return (
       <div className="sa-empty">
@@ -785,6 +1204,14 @@ function TenantTable({ tenants, onAction, pendingId, onViewDetails }: TenantTabl
                     >
                       👁 Details
                     </button>
+                    <button
+                      id={`btn-edit-${t.id}`}
+                      className="sa-btn-edit"
+                      onClick={() => onEdit(t)}
+                      aria-label={`Edit ${t.name}`}
+                    >
+                      ✏️ Edit
+                    </button>
                     {status === 'suspended' || status === 'expired' ? (
                       <button
                         id={`btn-reactivate-${t.id}`}
@@ -826,6 +1253,7 @@ export function SuperAdminPage({ user }: SuperAdminPageProps) {
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [selectedTenant, setSelectedTenant] = useState<TenantRow | null>(null);
+  const [editingTenant, setEditingTenant] = useState<TenantRow | null>(null);
 
   // Confirm dialog state
   const [confirmDialog, setConfirmDialog] = useState<{
@@ -1037,6 +1465,7 @@ export function SuperAdminPage({ user }: SuperAdminPageProps) {
               onAction={requestAction}
               pendingId={pendingId}
               onViewDetails={setSelectedTenant}
+              onEdit={setEditingTenant}
             />
           )}
         </div>
@@ -1047,6 +1476,19 @@ export function SuperAdminPage({ user }: SuperAdminPageProps) {
         <TenantDetailModal
           tenant={selectedTenant}
           onClose={() => setSelectedTenant(null)}
+          onEdit={setEditingTenant}
+        />
+      )}
+
+      {/* ── Edit Tenant Modal ── */}
+      {editingTenant && (
+        <EditTenantModal
+          tenant={editingTenant}
+          onClose={() => setEditingTenant(null)}
+          onSaved={msg => {
+            setSuccessMsg(msg);
+            load();
+          }}
         />
       )}
 

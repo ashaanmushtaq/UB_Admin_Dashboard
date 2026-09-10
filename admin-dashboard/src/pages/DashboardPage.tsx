@@ -11,15 +11,17 @@ import { FinancePage } from './FinancePage';
 import { ReportsPage } from './ReportsPage';
 import { NotificationsInboxPage } from './NotificationsInboxPage';
 import { OpeningBalancesPage } from './OpeningBalancesPage';
+import { ShopProfilePage } from './ShopProfilePage';
 import './DashboardPage.css';
 
 interface DashboardPageProps {
   user: User;
   profile: UserProfile | null;
   branding?: TenantBranding | null;
+  onRefreshUserData?: () => Promise<void> | void;
 }
 
-type ActivePage = 'home' | 'fabric-ledger' | 'employees' | 'production' | 'customer-ledger' | 'finance' | 'reports' | 'notifications' | 'opening-balances' | 'pos' | 'mobile-app';
+type ActivePage = 'home' | 'fabric-ledger' | 'employees' | 'production' | 'customer-ledger' | 'finance' | 'reports' | 'notifications' | 'opening-balances' | 'pos' | 'mobile-app' | 'settings';
 
 const ROLE_BADGE_COLORS: Record<string, string> = {
   owner:             '#e8b84b',
@@ -42,11 +44,12 @@ const MODULES = [
   { id: 'reports' as ActivePage,         label: 'Reports',          icon: '📊', status: 'live',    desc: 'Sales volume, stage throughput & outstanding liabilities' },
   { id: 'notifications' as ActivePage,   label: 'Inbox',            icon: '🔔', status: 'live',    desc: 'System notifications, payment notices & due reminders' },
   { id: 'opening-balances' as ActivePage, label: 'Opening Balances',icon: '📥', status: 'live',    desc: 'One-time data migration for starting dues & fabric stock' },
-  { id: 'pos' as ActivePage,             label: 'POS Counter',      icon: '🏪', status: 'live',    desc: 'Offline-first shop counter PWA for walk-in customers' },
+  { id: 'settings' as ActivePage,        label: 'Shop Profile',     icon: '🏪', status: 'live',    desc: 'Shop branding, contact info, owner details, and security' },
+  { id: 'pos' as ActivePage,             label: 'POS Counter',      icon: '🖥️', status: 'live',    desc: 'Offline-first shop counter PWA for walk-in customers' },
   { id: 'mobile-app' as ActivePage,      label: 'Mobile App',       icon: '📱', status: 'live',    desc: 'React Native app for production staff floor management' },
 ];
 
-export function DashboardPage({ user, profile, branding }: DashboardPageProps) {
+export function DashboardPage({ user, profile, branding, onRefreshUserData }: DashboardPageProps) {
   const [activePage, setActivePage] = useState<ActivePage>('home');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [tenantStatus, setTenantStatus] = useState<'loading' | 'active' | 'suspended' | 'expired'>('loading');
@@ -276,6 +279,13 @@ export function DashboardPage({ user, profile, branding }: DashboardPageProps) {
           <NotificationsInboxPage />
         ) : activePage === 'opening-balances' ? (
           <OpeningBalancesPage />
+        ) : activePage === 'settings' ? (
+          <ShopProfilePage
+            user={user}
+            profile={profile}
+            branding={branding}
+            onProfileUpdated={onRefreshUserData}
+          />
         ) : (
           <HomePage user={user} profile={profile} roleColor={roleColor} onNavigate={setActivePage} />
         )}

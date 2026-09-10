@@ -735,6 +735,27 @@
   color: #e9d5ff;
 }
 
+.sa-btn-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.8rem;
+  border-radius: 8px;
+  border: 1px solid rgba(245,158,11,0.3);
+  background: rgba(245,158,11,0.08);
+  color: #fcd34d;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: inherit;
+}
+.sa-btn-edit:hover {
+  background: rgba(245,158,11,0.2);
+  border-color: rgba(245,158,11,0.5);
+  color: #fef08a;
+}
+
 .sa-payments-card {
   background: rgba(255,255,255,0.02);
   border: 1px solid rgba(255,255,255,0.08);
@@ -852,4 +873,84 @@
   .sa-table th, .sa-table td { padding: 0.75rem 0.75rem; }
   .sa-topbar-email { display: none; }
   .sa-detail-dialog { padding: 1.25rem; }
+  .sa-edit-dialog { padding: 1.25rem; }
+}
+
+/* ─── Edit Tenant Modal ────────────────────────────────────── */
+.sa-edit-dialog {
+  background: #0d111e;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 20px;
+  padding: 2rem;
+  max-width: 780px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 30px 100px rgba(0,0,0,0.8);
+  animation: sa-slide-up 0.2s ease;
+}
+
+.sa-edit-tabs {
+  display: flex;
+  gap: 0.5rem;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  margin-bottom: 1.5rem;
+  padding-bottom: 0.5rem;
+  overflow-x: auto;
+}
+
+.sa-edit-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.9rem;
+  border-radius: 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: #94a3b8;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.sa-edit-tab:hover {
+  color: #e2e8f0;
+  background: rgba(255,255,255,0.04);
+}
+
+.sa-edit-tab--active {
+  color: #a78bfa;
+  background: rgba(139,92,246,0.12);
+  border-color: rgba(139,92,246,0.3);
+  font-weight: 600;
+}
+
+.sa-input-hint {
+  font-size: 0.75rem;
+  color: #64748b;
+  margin-top: 0.25rem;
+  line-height: 1.4;
+}
+
+.sa-input-hint--warning {
+  color: #fbbf24;
+}
+
+.sa-checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  cursor: pointer;
+  font-size: 0.88rem;
+  color: #e2e8f0;
+  user-select: none;
+}
+
+.sa-checkbox-label input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: #8b5cf6;
+  cursor: pointer;
 }

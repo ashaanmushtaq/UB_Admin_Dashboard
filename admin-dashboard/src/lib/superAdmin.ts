@@ -18,6 +18,7 @@ export interface TenantPayment {
 export interface TenantRow {
   id: string;
   name: string;
+  display_name: string;
   slug: string;
   company_name: string;
   plan_type: 'trial' | 'premium';
@@ -35,6 +36,54 @@ export interface TenantRow {
   notes: string | null;
   total_paid: number;
   latest_payment_date: string | null;
+}
+
+export interface UpdateTenantPayload {
+  tenant_id: string;
+  name?: string;
+  display_name?: string;
+  company_name?: string;
+  phone?: string;
+  address?: string;
+  city?: string;
+  notes?: string;
+  plan_type?: 'trial' | 'premium';
+  subscription_status?: 'active' | 'suspended' | 'expired';
+  subscription_start_date?: string;
+  subscription_end_date?: string;
+  is_active?: boolean;
+  owner_id?: string;
+  owner_full_name?: string;
+  owner_phone?: string;
+  owner_email?: string;
+  owner_password?: string;
+}
+
+export interface UpdateTenantResult {
+  success: boolean;
+  tenant: {
+    id: string;
+    name: string;
+    display_name: string;
+    slug: string;
+    company_name: string;
+    plan_type: string;
+    subscription_status: string;
+    subscription_start_date: string;
+    subscription_end_date: string;
+    phone?: string | null;
+    address?: string | null;
+    city?: string | null;
+    notes?: string | null;
+    is_active: boolean;
+  };
+  owner?: {
+    id: string;
+    email?: string;
+    full_name?: string;
+    phone?: string | null;
+    role?: string;
+  } | null;
 }
 
 export interface CreateTenantPayload {
@@ -172,4 +221,27 @@ export async function createTenant(payload: CreateTenantPayload): Promise<Create
   }
 
   return data as CreateTenantResult;
+}
+
+/**
+ * Update an existing tenant's fields and/or owner credentials.
+ * Calls the admin-update-tenant Edge Function with super_admin JWT verification.
+ */
+export async function updateTenant(payload: UpdateTenantPayload): Promise<UpdateTenantResult> {
+  const { data, error } = await supabase.functions.invoke('admin-update-tenant', {
+    body: payload,
+  });
+
+  if (error) {
+    let errorMsg = error.message;
+    if ('context' in error && (error as any).context) {
+      try {
+        const body = await (error as any).context.json();
+        if (body?.error) errorMsg = body.error;
+      } catch (_) {}
+    }
+    throw new Error(errorMsg);
+  }
+
+  return data as UpdateTenantResult;
 }

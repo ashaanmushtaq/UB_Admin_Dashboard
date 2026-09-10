@@ -34,7 +34,24 @@ async function checked(result, label) {
   return result.data;
 }
 
-export async function provisionTenant({ name, email, password, fullName = null, planType = 'trial', displayName = null, reassign = false }) {
+export async function provisionTenant({
+  name,
+  email,
+  password,
+  fullName = null,
+  planType = 'trial',
+  displayName = null,
+  phone = null,
+  address = null,
+  city = null,
+  notes = null,
+  paymentAmount = null,
+  paymentMethod = 'cash',
+  paymentDate = null,
+  paymentReference = null,
+  paymentNotes = null,
+  reassign = false,
+}) {
   const ownerFullName = fullName || name + ' Owner';
   const shopDisplayName = displayName || name;
   const slug = `${name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}-${Date.now()}`;
@@ -51,12 +68,16 @@ export async function provisionTenant({ name, email, password, fullName = null, 
       display_name: shopDisplayName,
       slug,
       company_name: name,
+      phone: phone || null,
+      address: address || null,
+      city: city || null,
+      notes: notes || null,
       plan_type: plan,
       subscription_status: 'active',
       subscription_start_date: startDate.toISOString(),
       subscription_end_date: endDate.toISOString(),
       is_active: true,
-    }).select('id, name, display_name, slug, plan_type, subscription_end_date').single(),
+    }).select('id, name, display_name, slug, plan_type, subscription_end_date, phone, address, city, notes').single(),
     'create tenant'
   );
   tenantId = tenant.id;
@@ -75,7 +96,7 @@ export async function provisionTenant({ name, email, password, fullName = null, 
     await checked(
       await admin.auth.admin.updateUserById(userId, {
         password,
-        user_metadata: { full_name: ownerFullName, role: 'owner' },
+        user_metadata: { full_name: ownerFullName, role: 'owner', phone: phone || null },
         email_confirm: true,
       }),
       'update existing auth user'
@@ -86,7 +107,7 @@ export async function provisionTenant({ name, email, password, fullName = null, 
         email,
         password,
         email_confirm: true,
-        user_metadata: { full_name: ownerFullName, role: 'owner' },
+        user_metadata: { full_name: ownerFullName, role: 'owner', phone: phone || null },
       }),
       'create owner auth user'
     );
@@ -100,11 +121,29 @@ export async function provisionTenant({ name, email, password, fullName = null, 
       id: userId,
       tenant_id: tenantId,
       full_name: ownerFullName,
+      phone: phone || null,
       role: 'owner',
       is_active: true,
       updated_at: new Date().toISOString(),
     }),
     'create owner profile'
+  );
+
+  // 4. Record initial payment if specified or default for plan
+  const amountToRecord = paymentAmount !== null && paymentAmount !== undefined
+    ? Number(paymentAmount)
+    : (plan === 'premium' ? 50000 : 5000);
+
+  const payment = await checked(
+    await admin.from('tenant_payments').insert({
+      tenant_id: tenantId,
+      amount: amountToRecord,
+      payment_method: paymentMethod || 'cash',
+      payment_date: paymentDate || new Date().toISOString().split('T')[0],
+      reference_no: paymentReference || null,
+      notes: paymentNotes || null,
+    }).select().single(),
+    'record initial tenant payment'
   );
 
   return {
@@ -114,13 +153,18 @@ export async function provisionTenant({ name, email, password, fullName = null, 
       slug: tenant.slug,
       plan_type: tenant.plan_type,
       subscription_end_date: tenant.subscription_end_date,
+      phone: tenant.phone,
+      address: tenant.address,
+      city: tenant.city,
+      notes: tenant.notes,
     },
     owner: {
       id: userId,
       email,
-      role: 'owner',
-      full_name: displayName,
+      full_name: ownerFullName,
+      phone,
     },
+    payment,
   };
 }
 
@@ -150,11 +194,15 @@ if (process.argv[1]?.endsWith('provision-tenant.mjs')) {
     console.error('Provisioning failed:', error.message);
     if (createdUserId) {
       console.log(`Compensating: Deleting created auth user ${createdUserId}...`);
-      await admin.auth.admin.deleteUser(createdUserId).catch(() => {});
+      try {
+        await admin.auth.admin.deleteUser(createdUserId);
+      } catch (_) {}
     }
     if (tenantId) {
       console.log(`Compensating: Deleting created tenant ${tenantId}...`);
-      await admin.from('tenants').delete().eq('id', tenantId).catch(() => {});
+      try {
+        await admin.from('tenants').delete().eq('id', tenantId);
+      } catch (_) {}
     }
     process.exit(1);
   }

@@ -150,7 +150,14 @@ export function App() {
     return <SuperAdminPage user={user} />;
   }
 
-  return <DashboardPage user={user} profile={profile} branding={branding} />;
+  return (
+    <DashboardPage
+      user={user}
+      profile={profile}
+      branding={branding}
+      onRefreshUserData={() => (user ? loadUserData(user) : undefined)}
+    />
+  );
 }
 
 function SplashScreen() {

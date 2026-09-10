@@ -37,6 +37,10 @@ serve(async (req) => {
       });
     }
 
+    // Get caller user ID for recorded_by
+    const { data: callerUser } = await callerClient.auth.getUser();
+    const recordedBy = callerUser.user?.id || null;
+
     // 2. Parse request parameters
     const body = await req.json();
     const {
@@ -46,15 +50,39 @@ serve(async (req) => {
       owner_email,
       owner_password,
       owner_full_name,
+      owner_phone,
+      address,
+      city,
+      notes,
+      payment_amount,
+      payment_method = "cash",
+      payment_date,
+      payment_reference,
+      payment_notes,
       plan_type = "trial",
     } = body;
 
-    if (!name || !owner_email || !owner_password) {
+    if (!name || !owner_email || !owner_password || !owner_phone || !address) {
       return new Response(
-        JSON.stringify({ error: "Missing required fields: name, owner_email, owner_password" }),
+        JSON.stringify({ error: "Missing required fields: name, owner_email, owner_password, owner_phone, address" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+
+    const amountNum = payment_amount !== undefined && payment_amount !== null && payment_amount !== ""
+      ? Number(payment_amount)
+      : (plan_type === "premium" ? 50000 : 5000);
+
+    if (isNaN(amountNum) || amountNum < 0) {
+      return new Response(
+        JSON.stringify({ error: "Invalid payment amount. Must be a non-negative number." }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const validMethods = ["cash", "bank_transfer", "jazzcash", "easypaisa", "cheque", "other"];
+    const pmtMethod = validMethods.includes(payment_method) ? payment_method : "cash";
+    const pmtDate = payment_date ? String(payment_date).split("T")[0] : new Date().toISOString().split("T")[0];
 
     const plan = plan_type === "premium" ? "premium" : "trial";
     const durationDays = plan === "premium" ? 365 : 30;
@@ -82,13 +110,17 @@ serve(async (req) => {
           logo_url: logo_url || null,
           slug,
           company_name: name,
+          phone: owner_phone,
+          address: address,
+          city: city || null,
+          notes: notes || null,
           plan_type: plan,
           subscription_status: "active",
           subscription_start_date: startDate.toISOString(),
           subscription_end_date: endDate.toISOString(),
           is_active: true,
         })
-        .select("id, name, display_name, slug, plan_type, subscription_status, subscription_end_date")
+        .select("id, name, display_name, slug, plan_type, subscription_status, subscription_end_date, phone, address, city, notes")
         .single();
 
       if (tenantErr) throw new Error(`Create tenant failed: ${tenantErr.message}`);
@@ -99,7 +131,7 @@ serve(async (req) => {
         email: owner_email,
         password: owner_password,
         email_confirm: true,
-        user_metadata: { full_name: ownerName, role: "owner" },
+        user_metadata: { full_name: ownerName, role: "owner", phone: owner_phone },
       });
 
       if (authErr) throw new Error(`Create auth user failed: ${authErr.message}`);
@@ -110,11 +142,29 @@ serve(async (req) => {
         id: userId,
         tenant_id: tenantId,
         full_name: ownerName,
+        phone: owner_phone,
         role: "owner",
         is_active: true,
       });
 
       if (profileErr) throw new Error(`Create profile failed: ${profileErr.message}`);
+
+      // 6. Record Initial Payment in tenant_payments table
+      const { data: paymentRecord, error: paymentErr } = await admin
+        .from("tenant_payments")
+        .insert({
+          tenant_id: tenantId,
+          amount: amountNum,
+          payment_method: pmtMethod,
+          payment_date: pmtDate,
+          reference_no: payment_reference || null,
+          notes: payment_notes || null,
+          recorded_by: recordedBy,
+        })
+        .select("id, tenant_id, amount, payment_method, payment_date, reference_no, notes")
+        .single();
+
+      if (paymentErr) throw new Error(`Record payment failed: ${paymentErr.message}`);
 
       return new Response(
         JSON.stringify({
@@ -123,16 +173,30 @@ serve(async (req) => {
           owner: {
             id: userId,
             email: owner_email,
-            full_name: displayName,
+            full_name: ownerName,
+            phone: owner_phone,
             role: "owner",
           },
+          payment: paymentRecord,
         }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     } catch (err: any) {
       // Rollback compensation
-      if (userId) await admin.auth.admin.deleteUser(userId).catch(() => {});
-      if (tenantId) await admin.from("tenants").delete().eq("id", tenantId).catch(() => {});
+      if (userId) {
+        try {
+          await admin.auth.admin.deleteUser(userId);
+        } catch (delErr) {
+          console.error("Failed to delete user during rollback:", delErr);
+        }
+      }
+      if (tenantId) {
+        try {
+          await admin.from("tenants").delete().eq("id", tenantId);
+        } catch (delErr) {
+          console.error("Failed to delete tenant during rollback:", delErr);
+        }
+      }
       throw err;
     }
   } catch (err: any) {
