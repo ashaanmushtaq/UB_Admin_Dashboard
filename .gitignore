@@ -26,6 +26,7 @@ logs/
 # Supabase Local Overrides
 backend/supabase/.branches/
 backend/supabase/.temp/
+backend/supabase/supabase/.temp/
 supabase/.temp/
 
 # IDE & OS Files
