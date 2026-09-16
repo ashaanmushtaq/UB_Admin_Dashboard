@@ -32,6 +32,7 @@ import type {
 } from '../lib/superAdmin';
 import './SuperAdminPage.css';
 import { ThemeToggle } from '../lib/theme';
+import karobitMark from '../assets/karobit-mark.png';
 
 interface SuperAdminPageProps {
   user: User;
@@ -1560,9 +1561,14 @@ export function SuperAdminPage({ user }: SuperAdminPageProps) {
     <div className="sa-root">
       {/* ── Top bar ── */}
       <div className="sa-topbar">
-        <div className="sa-topbar-brand">
-          <span className="sa-topbar-badge">🔐 Super Admin</span>
-          <span className="sa-topbar-title">Platform Control Panel</span>
+        <div className="sa-topbar-brand" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <img
+            src={karobitMark}
+            alt="Karobit"
+            style={{ width: '28px', height: '28px', objectFit: 'contain' }}
+          />
+          <span className="sa-topbar-title" style={{ fontWeight: 700 }}>Karobit Super Admin</span>
+          <span className="sa-topbar-badge">Platform Control Panel</span>
         </div>
         <div className="sa-topbar-actions">
           <ThemeToggle />

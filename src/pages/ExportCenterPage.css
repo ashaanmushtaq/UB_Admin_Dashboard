@@ -1,0 +1,172 @@
+.export-center-page {
+  padding: 1.5rem;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.export-header {
+  margin-bottom: 1.5rem;
+}
+
+.export-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text-main, #0f172a);
+  margin: 0 0 0.25rem 0;
+}
+
+.export-sub {
+  font-size: 0.875rem;
+  color: var(--text-muted, #64748b);
+  margin: 0;
+}
+
+.export-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 1.25rem;
+  margin-bottom: 2rem;
+}
+
+.export-card {
+  background: var(--card-bg, #ffffff);
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 12px;
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.export-card:hover {
+  box-shadow: 0 8px 16px -4px rgba(0, 0, 0, 0.08);
+  border-color: #cbd5e1;
+}
+
+.export-card-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.export-card-icon {
+  font-size: 1.75rem;
+  line-height: 1;
+}
+
+.export-card-title {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--text-main, #0f172a);
+  margin: 0 0 0.25rem 0;
+}
+
+.export-card-desc {
+  font-size: 0.825rem;
+  color: var(--text-muted, #64748b);
+  margin: 0;
+  line-height: 1.4;
+}
+
+.export-actions-row {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1.25rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border-color, #f1f5f9);
+}
+
+.export-format-btn {
+  flex: 1;
+  padding: 0.45rem 0.6rem;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  transition: all 0.15s ease;
+}
+
+.btn-excel {
+  background: #ecfdf5;
+  color: #047857;
+  border-color: #a7f3d0;
+}
+.btn-excel:hover {
+  background: #d1fae5;
+}
+
+.btn-word {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-color: #bfdbfe;
+}
+.btn-word:hover {
+  background: #dbeafe;
+}
+
+.btn-pdf {
+  background: #fef2f2;
+  color: #b91c1c;
+  border-color: #fecaca;
+}
+.btn-pdf:hover {
+  background: #fee2e2;
+}
+
+/* Floating / quick export button cluster in headers */
+.quick-export-cluster {
+  display: inline-flex;
+  align-items: center;
+  background: var(--card-bg, #ffffff);
+  border: 1px solid var(--border-color, #cbd5e1);
+  border-radius: 8px;
+  padding: 2px 4px;
+  gap: 4px;
+}
+
+.quick-export-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted, #64748b);
+  padding: 0 4px;
+}
+
+.quick-export-btn {
+  border: none;
+  background: transparent;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.quick-export-btn.excel {
+  color: #047857;
+}
+.quick-export-btn.excel:hover {
+  background: #ecfdf5;
+}
+
+.quick-export-btn.word {
+  color: #1d4ed8;
+}
+.quick-export-btn.word:hover {
+  background: #eff6ff;
+}
+
+.quick-export-btn.pdf {
+  color: #b91c1c;
+}
+.quick-export-btn.pdf:hover {
+  background: #fef2f2;
+}

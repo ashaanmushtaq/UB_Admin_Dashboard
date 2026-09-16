@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import type { PaymentMethod } from './fabric';
+import { notifyEmployeePayment } from './pushSender';
 
 /* ─── Types ──────────────────────────────────────────────────────────────── */
 
@@ -38,6 +39,7 @@ export interface EmployeeBalance {
   employment_type: EmploymentType;
   base_rate: number;
   total_earned: number;
+  pending_earned: number;
   total_paid: number;
   remaining_balance: number;
 }
@@ -52,7 +54,29 @@ export interface EmployeeLedgerEntry {
   reference_no: string | null;
   debit_amount: number;
   credit_amount: number;
+  status: 'pending' | 'approved' | 'rejected';
+  approved_by_name: string | null;
+  approved_at: string | null;
+  original_amount: number | null;
+  adjustment_notes: string | null;
   running_balance: number;
+  created_at: string;
+}
+
+export interface PendingEarning {
+  id: string;
+  tenant_id: string;
+  employee_id: string;
+  employee_name: string;
+  employee_role: EmployeeRole;
+  earning_date: string;
+  earning_type: EarningType;
+  amount: number;
+  quantity_completed: number | null;
+  rate_per_unit: number | null;
+  description: string | null;
+  order_id: string | null;
+  order_stage_log_id: string | null;
   created_at: string;
 }
 
@@ -115,19 +139,31 @@ export async function createStaffUserAccount(payload: {
   password?: string;
   full_name: string;
   role: EmployeeRole;
-}): Promise<void> {
-  const { error } = await supabase.auth.signUp({
-    email: payload.email,
-    password: payload.password || 'Garments123!',
-    options: {
-      data: {
-        full_name: payload.full_name,
-        role: payload.role,
-      },
+  employee_id?: string;
+  phone?: string;
+}): Promise<{ id: string; email: string; role: string }> {
+  const { data, error } = await supabase.functions.invoke('create-staff-user', {
+    body: {
+      email: payload.email,
+      password: payload.password || 'Garments123!',
+      full_name: payload.full_name,
+      role: payload.role,
+      employee_id: payload.employee_id,
+      phone: payload.phone,
     },
   });
-  if (error) throw error;
+
+  if (error) {
+    throw new Error(error.message || 'Failed to invoke create-staff-user function');
+  }
+
+  if (data?.error) {
+    throw new Error(data.error);
+  }
+
+  return data.user;
 }
+
 
 /* ─── Employee Earnings ──────────────────────────────────────────────────── */
 
@@ -174,6 +210,13 @@ export async function recordEmployeePayment(payload: {
     p_notes: payload.notes ?? null,
   });
   if (error) throw error;
+
+  void notifyEmployeePayment({
+    payment_id: data as string,
+    employee_id: payload.employee_id,
+    amount: payload.amount,
+  });
+
   return data as string;
 }
 
@@ -188,6 +231,56 @@ export async function fetchEmployeeLedger(employeeId: string): Promise<EmployeeL
     .order('created_at', { ascending: false });
   if (error) throw error;
   return (data ?? []) as EmployeeLedgerEntry[];
+}
+
+/* ─── Pending Earnings Approval ──────────────────────────────────────────── */
+
+export async function fetchPendingEarnings(): Promise<PendingEarning[]> {
+  const { data, error } = await supabase
+    .from('employee_earnings')
+    .select(`
+      id, tenant_id, employee_id, earning_date, earning_type,
+      amount, quantity_completed, rate_per_unit, description,
+      order_id, order_stage_log_id, created_at,
+      employees!inner(full_name, role)
+    `)
+    .eq('status', 'pending')
+    .order('earning_date', { ascending: true })
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return ((data ?? []) as any[]).map((row) => ({
+    id: row.id,
+    tenant_id: row.tenant_id,
+    employee_id: row.employee_id,
+    employee_name: row.employees?.full_name ?? 'Unknown',
+    employee_role: row.employees?.role ?? 'helper',
+    earning_date: row.earning_date,
+    earning_type: row.earning_type,
+    amount: Number(row.amount),
+    quantity_completed: row.quantity_completed != null ? Number(row.quantity_completed) : null,
+    rate_per_unit: row.rate_per_unit != null ? Number(row.rate_per_unit) : null,
+    description: row.description,
+    order_id: row.order_id,
+    order_stage_log_id: row.order_stage_log_id,
+    created_at: row.created_at,
+  })) as PendingEarning[];
+}
+
+export async function approveEmployeeEarning(earningId: string, adjustedAmount?: number, adjustmentNotes?: string): Promise<void> {
+  const { error } = await supabase.rpc('approve_employee_earning', {
+    p_earning_id: earningId,
+    p_adjusted_amount: adjustedAmount ?? null,
+    p_adjustment_notes: adjustmentNotes ?? null,
+  });
+  if (error) throw error;
+}
+
+export async function rejectEmployeeEarning(earningId: string, notes?: string): Promise<void> {
+  const { error } = await supabase.rpc('reject_employee_earning', {
+    p_earning_id: earningId,
+    p_notes: notes ?? null,
+  });
+  if (error) throw error;
 }
 
 /* ─── Notifications ──────────────────────────────────────────────────────── */

@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { notifyWorkAssignment } from './pushSender';
 
 /* ─── Types ──────────────────────────────────────────────────────────────── */
 
@@ -37,6 +38,9 @@ export interface OrderStageHistory {
   assigned_employee_id: string | null;
   assigned_employee_name: string | null;
   assigned_employee_role: string | null;
+  handed_off_by_employee_id?: string | null;
+  handed_off_by_name?: string | null;
+  handed_off_by_role?: string | null;
   started_at: string;
   completed_at: string | null;
   quantity_in: number;
@@ -146,6 +150,7 @@ export async function createProductionOrder(payload: {
   is_urgent?: boolean;
   target_delivery_date?: string;
   notes?: string;
+  assigned_cutting_master_id?: string;
 }): Promise<string> {
   const { data, error } = await supabase.rpc('create_production_order', {
     p_order_number: payload.order_number,
@@ -156,9 +161,22 @@ export async function createProductionOrder(payload: {
     p_is_urgent: payload.is_urgent ?? false,
     p_target_delivery_date: payload.target_delivery_date ?? null,
     p_notes: payload.notes ?? null,
+    p_assigned_cutting_master_id: payload.assigned_cutting_master_id ?? null,
   });
   if (error) throw error;
-  return data as string;
+
+  const orderId = data as string;
+
+  if (payload.assigned_cutting_master_id) {
+    void notifyWorkAssignment({
+      order_id: orderId,
+      next_stage: 'cutting',
+      assigned_employee_id: payload.assigned_cutting_master_id,
+      quantity_in: payload.total_quantity,
+    });
+  }
+
+  return orderId;
 }
 
 export async function advanceOrderStage(payload: {
@@ -176,6 +194,16 @@ export async function advanceOrderStage(payload: {
     p_notes: payload.notes ?? null,
   });
   if (error) throw error;
+
+  if (payload.assigned_employee_id) {
+    void notifyWorkAssignment({
+      order_id: payload.order_id,
+      next_stage: payload.next_stage,
+      assigned_employee_id: payload.assigned_employee_id,
+      quantity_in: payload.quantity_in,
+    });
+  }
+
   return data as string;
 }
 

@@ -1,16 +1,17 @@
-import { useState, useEffect, type FormEvent } from 'react';
+import { useState, useEffect, useMemo, type FormEvent } from 'react';
 import {
   fetchEmployeeBalances, fetchEmployees, addEmployee, createStaffUserAccount,
   fetchEmployeeLedger, recordEmployeeEarning, recordEmployeePayment,
+  fetchPendingEarnings, approveEmployeeEarning, rejectEmployeeEarning,
   fetchNotifications, markNotificationRead,
   ROLE_LABELS, ROLE_COLORS, EMPLOYMENT_TYPE_LABELS, EARNING_TYPE_LABELS, PAYMENT_TYPE_LABELS,
-  type EmployeeBalance, type Employee, type EmployeeLedgerEntry,
+  type EmployeeBalance, type Employee, type EmployeeLedgerEntry, type PendingEarning,
   type Notification, type EmployeeRole, type EmploymentType, type EarningType, type PaymentType,
 } from '../lib/employees';
 import { PAYMENT_METHOD_LABELS, formatCurrency, formatDate, type PaymentMethod } from '../lib/fabric';
 import './EmployeePage.css';
 
-type Modal = 'none' | 'add-employee' | 'add-earning' | 'add-payment' | 'notifications' | 'create-user';
+type Modal = 'none' | 'add-employee' | 'add-earning' | 'add-payment' | 'notifications' | 'create-user' | 'pending-approvals';
 
 export function EmployeePage() {
   const [balances, setBalances] = useState<EmployeeBalance[]>([]);
@@ -18,6 +19,7 @@ export function EmployeePage() {
   const [selected, setSelected] = useState<EmployeeBalance | null>(null);
   const [ledger, setLedger] = useState<EmployeeLedgerEntry[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [pendingEarnings, setPendingEarnings] = useState<PendingEarning[]>([]);
   const [modal, setModal] = useState<Modal>('none');
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -31,14 +33,16 @@ export function EmployeePage() {
   async function loadAll() {
     setLoading(true); setError('');
     try {
-      const [b, e, n] = await Promise.all([
+      const [b, e, n, p] = await Promise.all([
         fetchEmployeeBalances(),
         fetchEmployees(),
         fetchNotifications(),
+        fetchPendingEarnings(),
       ]);
       setBalances(b);
       setEmployees(e);
       setNotifications(n);
+      setPendingEarnings(p);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to load employees');
     } finally {
@@ -76,6 +80,7 @@ export function EmployeePage() {
 
   const totalOwed = balances.reduce((s, b) => s + Math.max(0, b.remaining_balance), 0);
   const totalEarned = balances.reduce((s, b) => s + b.total_earned, 0);
+  const totalPending = balances.reduce((s, b) => s + (b.pending_earned ?? 0), 0);
 
   return (
     <div className="emp-root">
@@ -90,6 +95,11 @@ export function EmployeePage() {
             🔔
             {unreadCount > 0 && <span className="emp-notif-badge" aria-hidden="true">{unreadCount}</span>}
           </button>
+          {pendingEarnings.length > 0 && (
+            <button id="btn-pending-approvals" className="emp-btn emp-btn--warning" onClick={() => setModal('pending-approvals')}>
+              ⏳ Approve Earnings ({pendingEarnings.length})
+            </button>
+          )}
           <button id="btn-add-earning" className="emp-btn emp-btn--secondary" onClick={() => setModal('add-earning')}>
             + Record Earning
           </button>
@@ -112,9 +122,15 @@ export function EmployeePage() {
           <span className="emp-stat-value">{balances.length}</span>
         </div>
         <div className="emp-stat">
-          <span className="emp-stat-label">Total Earned (Logged)</span>
+          <span className="emp-stat-label">Total Earned (Approved)</span>
           <span className="emp-stat-value emp-stat-value--blue">{formatCurrency(totalEarned)}</span>
         </div>
+        {totalPending > 0 && (
+          <div className="emp-stat emp-stat--pending" style={{ cursor: 'pointer' }} onClick={() => setModal('pending-approvals')} title="Click to review pending earnings">
+            <span className="emp-stat-label">⏳ Pending Approval</span>
+            <span className="emp-stat-value emp-stat-value--amber">{formatCurrency(totalPending)}</span>
+          </div>
+        )}
         <div className="emp-stat emp-stat--warning">
           <span className="emp-stat-label">Total Wages Due</span>
           <span className="emp-stat-value emp-stat-value--amber">{formatCurrency(totalOwed)}</span>
@@ -263,10 +279,26 @@ export function EmployeePage() {
                             <tr key={`${entry.transaction_id}-${i}`} className={entry.entry_type === 'earning' ? 'emp-tr--earning' : 'emp-tr--payment'}>
                               <td className="emp-td-date">{formatDate(entry.transaction_date)}</td>
                               <td>
-                                <span className={`emp-badge ${entry.entry_type === 'earning' ? 'emp-badge--earning' : 'emp-badge--payment'}`}>
-                                  {entry.entry_type === 'earning' ? 'Earned' : 'Paid'}
+                                <span className={`emp-badge ${
+                                  entry.entry_type === 'earning'
+                                    ? (entry.status === 'pending' ? 'emp-badge--pending' : entry.status === 'rejected' ? 'emp-badge--rejected' : 'emp-badge--earning')
+                                    : 'emp-badge--payment'
+                                }`}>
+                                  {entry.entry_type === 'earning'
+                                    ? (entry.status === 'pending' ? '⏳ Pending' : entry.status === 'rejected' ? '✕ Rejected' : 'Earned')
+                                    : 'Paid'}
                                 </span>
                                 <span className="emp-desc">{entry.description}</span>
+                                {entry.entry_type === 'earning' && entry.status === 'approved' && entry.approved_by_name && (
+                                  <span className="emp-approver-tag" title={`Approved by ${entry.approved_by_name}`}>
+                                    ✓ Approved by {entry.approved_by_name}
+                                  </span>
+                                )}
+                                {entry.original_amount != null && entry.original_amount !== entry.debit_amount && (
+                                  <span className="emp-adj-detail" title={entry.adjustment_notes ? `Notes: ${entry.adjustment_notes}` : undefined}>
+                                    ✏️ Adj. from {formatCurrency(entry.original_amount)}{entry.adjustment_notes ? ` (${entry.adjustment_notes})` : ''}
+                                  </span>
+                                )}
                               </td>
                               <td className="emp-td-ref">{entry.reference_no ?? '—'}</td>
                               <td className="emp-td-num emp-td-earn">
@@ -308,8 +340,16 @@ export function EmployeePage() {
         }} />
       )}
       {modal === 'create-user' && (
-        <CreateUserModal onClose={() => setModal('none')} onSuccess={afterAction} />
+        <CreateUserModal employees={employees} onClose={() => setModal('none')} onSuccess={afterAction} />
       )}
+      {modal === 'pending-approvals' && (
+        <PendingApprovalsModal
+          earnings={pendingEarnings}
+          onClose={() => setModal('none')}
+          onSuccess={afterAction}
+        />
+      )}
+
     </div>
   );
 }
@@ -618,8 +658,335 @@ function ModalShell({ title, children, onClose }: { title: string; children: Rea
   );
 }
 
+/* ─── Pending Earnings Approval Modal ───────────────────────────────────── */
+function PendingApprovalsModal({ earnings, onClose, onSuccess }: {
+  earnings: PendingEarning[];
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [actionMap, setActionMap] = useState<Record<string, { adjustedAmount: string; notes: string }>>({});
+  const [processingId, setProcessingId] = useState<string | null>(null);
+  const [batchProcessing, setBatchProcessing] = useState(false);
+  const [doneIds, setDoneIds] = useState<Set<string>>(new Set());
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [groupBy, setGroupBy] = useState<'worker' | 'all'>('worker');
+
+  function getAction(id: string) {
+    return actionMap[id] ?? { adjustedAmount: '', notes: '' };
+  }
+
+  function setField(id: string, field: 'adjustedAmount' | 'notes', value: string) {
+    setActionMap(prev => ({ ...prev, [id]: { ...getAction(id), [field]: value } }));
+  }
+
+  async function handleApprove(earning: PendingEarning) {
+    setProcessingId(earning.id);
+    setErrors(prev => { const c = { ...prev }; delete c[earning.id]; return c; });
+    try {
+      const { adjustedAmount, notes } = getAction(earning.id);
+      const adj = adjustedAmount ? parseFloat(adjustedAmount) : undefined;
+      await approveEmployeeEarning(earning.id, adj && adj !== earning.amount ? adj : undefined, notes || undefined);
+      setDoneIds(prev => new Set([...prev, earning.id]));
+    } catch (err: unknown) {
+      setErrors(prev => ({ ...prev, [earning.id]: err instanceof Error ? err.message : 'Failed to approve' }));
+    } finally {
+      setProcessingId(null);
+    }
+  }
+
+  async function handleReject(earning: PendingEarning) {
+    setProcessingId(earning.id);
+    setErrors(prev => { const c = { ...prev }; delete c[earning.id]; return c; });
+    try {
+      const { notes } = getAction(earning.id);
+      await rejectEmployeeEarning(earning.id, notes || undefined);
+      setDoneIds(prev => new Set([...prev, earning.id]));
+    } catch (err: unknown) {
+      setErrors(prev => ({ ...prev, [earning.id]: err instanceof Error ? err.message : 'Failed to reject' }));
+    } finally {
+      setProcessingId(null);
+    }
+  }
+
+  async function handleApproveAll() {
+    setBatchProcessing(true);
+    const remaining = earnings.filter(e => !doneIds.has(e.id));
+    for (const earning of remaining) {
+      try {
+        await approveEmployeeEarning(earning.id);
+        setDoneIds(prev => new Set([...prev, earning.id]));
+      } catch {
+        // Skip failed, continue
+      }
+    }
+    setBatchProcessing(false);
+    onSuccess();
+  }
+
+  async function handleApproveWorkerBatch(workerItems: PendingEarning[]) {
+    setBatchProcessing(true);
+    const remaining = workerItems.filter(e => !doneIds.has(e.id));
+    for (const item of remaining) {
+      try {
+        await approveEmployeeEarning(item.id);
+        setDoneIds(prev => new Set([...prev, item.id]));
+      } catch {
+        // Skip failed
+      }
+    }
+    setBatchProcessing(false);
+  }
+
+  const pending = earnings.filter(e => !doneIds.has(e.id));
+
+  // Group pending entries by employee
+  const groupedWorkers = useMemo(() => {
+    const map = new Map<string, { employeeName: string; employeeRole: string; items: PendingEarning[] }>();
+    for (const item of earnings) {
+      if (!map.has(item.employee_id)) {
+        map.set(item.employee_id, {
+          employeeName: item.employee_name,
+          employeeRole: item.employee_role,
+          items: [],
+        });
+      }
+      map.get(item.employee_id)!.items.push(item);
+    }
+    return Array.from(map.entries()).map(([employeeId, data]) => {
+      const activeItems = data.items.filter(e => !doneIds.has(e.id));
+      const totalAmount = activeItems.reduce((sum, e) => sum + e.amount, 0);
+      return {
+        employeeId,
+        ...data,
+        activeItems,
+        totalAmount,
+      };
+    });
+  }, [earnings, doneIds]);
+
+  function renderEarningCard(earning: PendingEarning) {
+    const isDone = doneIds.has(earning.id);
+    const isProcessing = processingId === earning.id;
+    const { adjustedAmount, notes } = getAction(earning.id);
+    const previewAmount = adjustedAmount ? parseFloat(adjustedAmount) : earning.amount;
+
+    return (
+      <div
+        key={earning.id}
+        id={`pending-earning-${earning.id}`}
+        className={`emp-pending-card${isDone ? ' emp-pending-card--done' : ''}`}
+      >
+        {isDone && (
+          <div className="emp-pending-done-overlay">✅ Processed</div>
+        )}
+
+        <div className="emp-pending-header">
+          <div className="emp-pending-worker">
+            <div className="emp-avatar" style={{ background: `linear-gradient(135deg, ${ROLE_COLORS[earning.employee_role as keyof typeof ROLE_COLORS] ?? '#666'}, #33333388)`, width: 36, height: 36, fontSize: '0.9rem' }} aria-hidden="true">
+              {earning.employee_name[0]?.toUpperCase()}
+            </div>
+            <div>
+              <div className="emp-pending-worker-name">{earning.employee_name}</div>
+              <div className="emp-pending-worker-role" style={{ color: ROLE_COLORS[earning.employee_role as keyof typeof ROLE_COLORS] ?? '#888' }}>
+                {ROLE_LABELS[earning.employee_role as keyof typeof ROLE_LABELS] ?? earning.employee_role}
+              </div>
+            </div>
+          </div>
+          <div className="emp-pending-amount-block">
+            <div className="emp-pending-orig-amount">{formatCurrency(earning.amount)}</div>
+            {earning.quantity_completed != null && earning.rate_per_unit != null && (
+              <div className="emp-pending-rate-detail">
+                {earning.quantity_completed} pcs × {formatCurrency(earning.rate_per_unit)}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {earning.description && (
+          <div className="emp-pending-desc">{earning.description}</div>
+        )}
+
+        <div className="emp-pending-meta">
+          <span>📅 {formatDate(earning.earning_date)}</span>
+          <span className="emp-badge emp-badge--earning">{EARNING_TYPE_LABELS[earning.earning_type as EarningType] ?? earning.earning_type}</span>
+        </div>
+
+        {errors[earning.id] && (
+          <div className="emp-modal-error" style={{ marginTop: '0.5rem' }}>⚠️ {errors[earning.id]}</div>
+        )}
+
+        {!isDone && (
+          <div className="emp-pending-actions">
+            <div className="emp-pending-fields">
+              <div className="emp-field">
+                <label htmlFor={`adj-amount-${earning.id}`} className="emp-label">
+                  Adjusted Amount (PKR) — leave blank to approve as-is
+                </label>
+                <input
+                  id={`adj-amount-${earning.id}`}
+                  className="emp-input emp-input--sm"
+                  type="number"
+                  min="0"
+                  step="1"
+                  placeholder={String(earning.amount)}
+                  value={adjustedAmount}
+                  onChange={e => setField(earning.id, 'adjustedAmount', e.target.value)}
+                  disabled={isProcessing}
+                />
+                {adjustedAmount && !isNaN(previewAmount) && previewAmount !== earning.amount && (
+                  <div className="emp-pending-preview">
+                    Will approve as: <strong>{formatCurrency(previewAmount)}</strong>
+                    {' '}(was {formatCurrency(earning.amount)})
+                  </div>
+                )}
+              </div>
+              <div className="emp-field">
+                <label htmlFor={`adj-notes-${earning.id}`} className="emp-label">
+                  Notes (optional — required for rejection)
+                </label>
+                <input
+                  id={`adj-notes-${earning.id}`}
+                  className="emp-input emp-input--sm"
+                  placeholder="e.g. Adjusted for rework, or reason for rejection"
+                  value={notes}
+                  onChange={e => setField(earning.id, 'notes', e.target.value)}
+                  disabled={isProcessing}
+                />
+              </div>
+            </div>
+            <div className="emp-pending-btns">
+              <button
+                id={`btn-approve-${earning.id}`}
+                className="emp-btn emp-btn--success"
+                onClick={() => handleApprove(earning)}
+                disabled={isProcessing || batchProcessing}
+              >
+                {isProcessing ? <><span className="emp-spinner emp-spinner--sm" />…</> : '✓ Approve'}
+              </button>
+              <button
+                id={`btn-reject-${earning.id}`}
+                className="emp-btn emp-btn--danger"
+                onClick={() => handleReject(earning)}
+                disabled={isProcessing || batchProcessing}
+              >
+                ✕ Reject
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <ModalShell title={`⏳ Pending Earnings Approval (${pending.length})`} onClose={() => { if (doneIds.size > 0) onSuccess(); else onClose(); }}>
+      <div className="emp-pending-intro">
+        These piece-rate earnings were auto-calculated when workers updated completed quantity. Review, adjust, or approve entries below.
+        {pending.length > 1 && (
+          <button
+            id="btn-approve-all-earnings"
+            className="emp-btn emp-btn--success emp-btn--sm"
+            style={{ marginLeft: '1rem' }}
+            onClick={handleApproveAll}
+            disabled={batchProcessing}
+          >
+            {batchProcessing ? <><span className="emp-spinner emp-spinner--sm" />Approving…</> : `✓ Approve All (${pending.length})`}
+          </button>
+        )}
+      </div>
+
+      {earnings.length > 0 && (
+        <div className="emp-pending-view-toggle">
+          <button
+            type="button"
+            className={`emp-pending-tab-btn${groupBy === 'worker' ? ' emp-pending-tab-btn--active' : ''}`}
+            onClick={() => setGroupBy('worker')}
+          >
+            👥 Group by Worker ({groupedWorkers.filter(g => g.activeItems.length > 0).length})
+          </button>
+          <button
+            type="button"
+            className={`emp-pending-tab-btn${groupBy === 'all' ? ' emp-pending-tab-btn--active' : ''}`}
+            onClick={() => setGroupBy('all')}
+          >
+            📋 All Pending Items ({pending.length})
+          </button>
+        </div>
+      )}
+
+      {earnings.length === 0 ? (
+        <div className="emp-empty" style={{ padding: '2rem', textAlign: 'center' }}>
+          ✅ No pending earnings to review.
+        </div>
+      ) : groupBy === 'worker' ? (
+        <div className="emp-pending-groups" id="pending-earnings-groups">
+          {groupedWorkers.map(group => {
+            const isGroupDone = group.activeItems.length === 0;
+            return (
+              <div key={group.employeeId} className={`emp-pending-group${isGroupDone ? ' emp-pending-group--done' : ''}`}>
+                <div className="emp-pending-group-header">
+                  <div className="emp-pending-group-info">
+                    <span className="emp-pending-group-name">{group.employeeName}</span>
+                    <span className="emp-pending-worker-role" style={{ color: ROLE_COLORS[group.employeeRole as keyof typeof ROLE_COLORS] ?? '#888' }}>
+                      {ROLE_LABELS[group.employeeRole as keyof typeof ROLE_LABELS] ?? group.employeeRole}
+                    </span>
+                    <span className="emp-badge emp-badge--pending">
+                      {group.activeItems.length} awaiting approval
+                    </span>
+                  </div>
+                  <div className="emp-pending-group-actions">
+                    <span className="emp-pending-group-total">
+                      Total: <strong>{formatCurrency(group.totalAmount)}</strong>
+                    </span>
+                    {!isGroupDone && group.activeItems.length > 1 && (
+                      <button
+                        type="button"
+                        className="emp-btn emp-btn--success emp-btn--xs"
+                        onClick={() => handleApproveWorkerBatch(group.items)}
+                        disabled={batchProcessing}
+                      >
+                        ✓ Approve {group.activeItems.length} for {group.employeeName}
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <div className="emp-pending-group-items">
+                  {group.items.map(earning => renderEarningCard(earning))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="emp-pending-list" id="pending-earnings-list">
+          {earnings.map((earning) => renderEarningCard(earning))}
+        </div>
+      )}
+
+      <div className="emp-modal-footer">
+        <button
+          id="btn-close-pending-approvals"
+          className="emp-btn emp-btn--primary"
+          onClick={() => { if (doneIds.size > 0) onSuccess(); else onClose(); }}
+        >
+          {doneIds.size > 0 ? `Done — ${doneIds.size} processed` : 'Close'}
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
 /* ─── Create User Account Modal ─────────────────────────────────────────── */
-function CreateUserModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
+function CreateUserModal({
+  employees,
+  onClose,
+  onSuccess,
+}: {
+  employees: Employee[];
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [selectedEmpId, setSelectedEmpId] = useState<string>('');
   const [form, setForm] = useState({
     email: '',
     password: '',
@@ -629,18 +996,38 @@ function CreateUserModal({ onClose, onSuccess }: { onClose: () => void; onSucces
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  function handleSelectEmployee(empId: string) {
+    setSelectedEmpId(empId);
+    if (!empId) return;
+    const emp = employees.find(e => e.id === empId);
+    if (emp) {
+      setForm(prev => ({
+        ...prev,
+        full_name: emp.full_name,
+        role: emp.role,
+        email: emp.email || prev.email,
+      }));
+    }
+  }
+
   async function handleSubmit(e: FormEvent) {
-    e.preventDefault(); setLoading(true); setError('');
+    e.preventDefault();
+    setLoading(true);
+    setError('');
     try {
       await createStaffUserAccount({
         email: form.email.trim(),
         password: form.password || 'Garments123!',
         full_name: form.full_name.trim(),
         role: form.role,
+        employee_id: selectedEmpId || undefined,
       });
       onSuccess();
-    } catch (err: unknown) { setError(err instanceof Error ? err.message : 'Failed to create user account'); }
-    finally { setLoading(false); }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to create user account');
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -649,16 +1036,52 @@ function CreateUserModal({ onClose, onSuccess }: { onClose: () => void; onSucces
         {error && <div className="emp-modal-error">⚠️ {error}</div>}
         <div className="emp-field-grid">
           <div className="emp-field emp-field--full">
+            <label htmlFor="user-emp-select" className="emp-label">Link to Existing Employee (Optional)</label>
+            <select
+              id="user-emp-select"
+              className="emp-input"
+              value={selectedEmpId}
+              onChange={e => handleSelectEmployee(e.target.value)}
+            >
+              <option value="">— ➕ Create Brand New Staff Account —</option>
+              {employees.map(e => (
+                <option key={e.id} value={e.id}>
+                  {e.full_name} ({ROLE_LABELS[e.role] || e.role}) {e.user_id ? '✓ (Login Linked)' : '⚠️ (No Login)'}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="emp-field emp-field--full">
             <label htmlFor="user-name" className="emp-label">Full Name *</label>
-            <input id="user-name" className="emp-input" required value={form.full_name} onChange={e => setForm(f => ({ ...f, full_name: e.target.value }))} placeholder="e.g. Tariq Mehmood" />
+            <input
+              id="user-name"
+              className="emp-input"
+              required
+              value={form.full_name}
+              onChange={e => setForm(f => ({ ...f, full_name: e.target.value }))}
+              placeholder="e.g. Tariq Mehmood"
+            />
           </div>
           <div className="emp-field emp-field--full">
             <label htmlFor="user-email" className="emp-label">Staff Email Address *</label>
-            <input id="user-email" className="emp-input" type="email" required value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="staff@shop.com" />
+            <input
+              id="user-email"
+              className="emp-input"
+              type="email"
+              required
+              value={form.email}
+              onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
+              placeholder="staff@shop.com"
+            />
           </div>
           <div className="emp-field">
             <label htmlFor="user-role" className="emp-label">Assigned Role *</label>
-            <select id="user-role" className="emp-input" value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value as EmployeeRole }))}>
+            <select
+              id="user-role"
+              className="emp-input"
+              value={form.role}
+              onChange={e => setForm(f => ({ ...f, role: e.target.value as EmployeeRole }))}
+            >
               {(Object.entries(ROLE_LABELS) as [EmployeeRole, string][]).map(([v, l]) => (
                 <option key={v} value={v}>{l}</option>
               ))}
@@ -666,12 +1089,24 @@ function CreateUserModal({ onClose, onSuccess }: { onClose: () => void; onSucces
           </div>
           <div className="emp-field">
             <label htmlFor="user-pass" className="emp-label">Initial Password</label>
-            <input id="user-pass" className="emp-input" type="password" value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} placeholder="Default: Garments123!" />
+            <input
+              id="user-pass"
+              className="emp-input"
+              type="password"
+              value={form.password}
+              onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
+              placeholder="Default: Garments123!"
+            />
           </div>
         </div>
         <div className="emp-modal-footer">
           <button type="button" className="emp-btn emp-btn--ghost" onClick={onClose}>Cancel</button>
-          <button id="submit-create-user" type="submit" className="emp-btn emp-btn--primary" disabled={loading || !form.email || !form.full_name}>
+          <button
+            id="submit-create-user"
+            type="submit"
+            className="emp-btn emp-btn--primary"
+            disabled={loading || !form.email || !form.full_name}
+          >
             {loading ? <><span className="emp-spinner emp-spinner--sm" />Creating Account…</> : 'Create Login Account'}
           </button>
         </div>
@@ -679,3 +1114,4 @@ function CreateUserModal({ onClose, onSuccess }: { onClose: () => void; onSucces
     </ModalShell>
   );
 }
+

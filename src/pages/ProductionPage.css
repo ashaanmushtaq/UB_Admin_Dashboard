@@ -618,6 +618,13 @@
   color: var(--text-secondary);
 }
 
+.prod-field-hint {
+  font-size: 0.75rem;
+  color: #6d9e8e;
+  margin: 0;
+  padding: 0.25rem 0 0;
+}
+
 .prod-input {
   width: 100%;
   background: var(--bg-elevated);

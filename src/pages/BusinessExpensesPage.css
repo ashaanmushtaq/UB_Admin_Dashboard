@@ -1,0 +1,112 @@
+.expenses-page {
+  padding: 1.5rem;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.expenses-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.expenses-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text-main, #0f172a);
+  margin: 0 0 0.25rem 0;
+}
+
+.expenses-sub {
+  font-size: 0.875rem;
+  color: var(--text-muted, #64748b);
+  margin: 0;
+}
+
+.expenses-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.expense-stat-card {
+  background: var(--card-bg, #ffffff);
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 12px;
+  padding: 1rem;
+}
+
+.expense-stat-icon {
+  font-size: 1.25rem;
+  margin-bottom: 0.25rem;
+}
+
+.expense-stat-title {
+  font-size: 0.8rem;
+  color: var(--text-muted, #64748b);
+  font-weight: 500;
+}
+
+.expense-stat-amount {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text-main, #0f172a);
+  margin-top: 0.25rem;
+}
+
+.expenses-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  margin-bottom: 1.25rem;
+  background: var(--card-bg, #ffffff);
+  padding: 0.75rem 1rem;
+  border-radius: 10px;
+  border: 1px solid var(--border-color, #e2e8f0);
+}
+
+.expenses-filter-select, .expenses-filter-input {
+  padding: 0.45rem 0.75rem;
+  border-radius: 6px;
+  border: 1px solid var(--border-color, #cbd5e1);
+  font-size: 0.85rem;
+  background: var(--input-bg, #ffffff);
+  color: var(--text-main, #0f172a);
+}
+
+.expense-category-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.category-rent { background: #fee2e2; color: #b91c1c; }
+.category-electricity { background: #fef9c3; color: #a16207; }
+.category-transport { background: #e0f2fe; color: #0369a1; }
+.category-salaries { background: #dcfce7; color: #15803d; }
+.category-miscellaneous { background: #f1f5f9; color: #475569; }
+
+.expenses-delete-btn {
+  background: none;
+  border: none;
+  color: #ef4444;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  transition: background 0.15s;
+}
+
+.expenses-delete-btn:hover {
+  background: #fee2e2;
+}

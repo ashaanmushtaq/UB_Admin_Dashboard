@@ -41,9 +41,28 @@ export async function getTenantBranding(tenantId: string): Promise<TenantBrandin
   }
 }
 
+export const ALLOWED_ADMIN_ROLES = ['owner', 'shop_staff'] as const;
+export const MOBILE_ONLY_REDIRECT_MESSAGE = 'This account is for the mobile app only. Please download and use the Workroom mobile app to log in.';
+
 export async function signIn(email: string, password: string) {
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) throw error;
+  if (!data.user) throw new Error('No user returned from sign in.');
+
+  // Check if super admin
+  const isSuper = await isSuperAdmin().catch(() => false);
+  if (isSuper) {
+    return data;
+  }
+
+  // Fetch profile to verify role
+  const profile = await getProfile(data.user);
+  if (!profile || !ALLOWED_ADMIN_ROLES.includes(profile.role as any)) {
+    // Immediately sign out to destroy the local session
+    await supabase.auth.signOut();
+    throw new Error(MOBILE_ONLY_REDIRECT_MESSAGE);
+  }
+
   return data;
 }
 

@@ -319,9 +319,40 @@ export function ProductionPage() {
                     )}
                   </div>
 
-                  {/* Stage Logs History */}
+                  {/* Stage Logs History & Chain of Custody */}
                   <div className="prod-detail-section">
-                    <h3 className="prod-section-title">⏱️ Stage History & Handled Staff Logs</h3>
+                    <div className="prod-custody-banner">
+                      <div className="prod-custody-header">
+                        <span className="prod-custody-tag">🔗 CHAIN OF CUSTODY</span>
+                        <span className="prod-custody-state">
+                          {selectedOrder.current_stage === 'delivered'
+                            ? '✅ Final Delivery Complete'
+                            : selectedOrder.current_stage === 'ready_for_dispatch'
+                            ? '🚚 Awaiting Dispatch & Driver'
+                            : '⚡ Active Floor Production'}
+                        </span>
+                      </div>
+                      <div className="prod-custody-info">
+                        <div>
+                          <span className="prod-custody-label">Current Custodian: </span>
+                          <strong className="prod-custody-val">
+                            {stageHistory.length > 0 && stageHistory[stageHistory.length - 1].assigned_employee_name
+                              ? `👤 ${stageHistory[stageHistory.length - 1].assigned_employee_name} (${ROLE_LABELS[stageHistory[stageHistory.length - 1].assigned_employee_role as keyof typeof ROLE_LABELS] || stageHistory[stageHistory.length - 1].assigned_employee_role})`
+                              : '⚠️ Unassigned Stage Pool'}
+                          </strong>
+                        </div>
+                        {stageHistory.length > 1 && stageHistory[stageHistory.length - 1].handed_off_by_name && (
+                          <div className="prod-custody-handoff">
+                            <span className="prod-custody-label">Handed off by: </span>
+                            <span>
+                              🤝 {stageHistory[stageHistory.length - 1].handed_off_by_name} ({ROLE_LABELS[stageHistory[stageHistory.length - 1].handed_off_by_role as keyof typeof ROLE_LABELS] || stageHistory[stageHistory.length - 1].handed_off_by_role})
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <h3 className="prod-section-title">⏱️ Custody History & Stage Transitions</h3>
                     <div className="prod-history-list">
                       {stageHistory.map(h => (
                         <div key={h.log_id} className="prod-history-item">
@@ -332,6 +363,11 @@ export function ProductionPage() {
                               <div className="prod-history-emp">
                                 👤 {h.assigned_employee_name ? `${h.assigned_employee_name} (${ROLE_LABELS[h.assigned_employee_role as keyof typeof ROLE_LABELS] || h.assigned_employee_role})` : 'Unassigned'}
                               </div>
+                              {h.handed_off_by_name && (
+                                <div className="prod-history-handoff-by">
+                                  🤝 Handed off by: <strong>{h.handed_off_by_name}</strong> ({ROLE_LABELS[h.handed_off_by_role as keyof typeof ROLE_LABELS] || h.handed_off_by_role})
+                                </div>
+                              )}
                             </div>
                           </div>
                           <div className="prod-history-right">
@@ -357,7 +393,7 @@ export function ProductionPage() {
 
       {/* ── Modals ── */}
       {modal === 'create-order' && (
-        <CreateOrderModal onClose={() => setModal('none')} onSuccess={afterAction} />
+        <CreateOrderModal employees={employees} onClose={() => setModal('none')} onSuccess={afterAction} />
       )}
       {modal === 'advance-stage' && selectedOrder && (
         <AdvanceStageModal order={selectedOrder} employees={employees} onClose={() => setModal('none')} onSuccess={afterAction} />
@@ -370,7 +406,9 @@ export function ProductionPage() {
 }
 
 /* ─── Create Order Modal ─────────────────────────────────────────────────── */
-function CreateOrderModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
+function CreateOrderModal({ employees, onClose, onSuccess }: { employees: Employee[]; onClose: () => void; onSuccess: () => void }) {
+  const cuttingMasters = employees.filter(e => e.role === 'cutting_master');
+
   const [form, setForm] = useState({
     order_number: `ORD-${Math.floor(1000 + Math.random() * 9000)}`,
     customer_name: '',
@@ -380,6 +418,7 @@ function CreateOrderModal({ onClose, onSuccess }: { onClose: () => void; onSucce
     is_urgent: false,
     target_delivery_date: '',
     notes: '',
+    assigned_cutting_master_id: '',
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -397,6 +436,7 @@ function CreateOrderModal({ onClose, onSuccess }: { onClose: () => void; onSucce
         is_urgent: form.is_urgent,
         target_delivery_date: form.target_delivery_date || undefined,
         notes: form.notes || undefined,
+        assigned_cutting_master_id: form.assigned_cutting_master_id || undefined,
       });
       onSuccess();
     } catch (err: unknown) {
@@ -440,6 +480,23 @@ function CreateOrderModal({ onClose, onSuccess }: { onClose: () => void; onSucce
           <div className="prod-field">
             <label htmlFor="ord-date" className="prod-label">Target Delivery Date</label>
             <input id="ord-date" className="prod-input" type="date" value={form.target_delivery_date} onChange={e => setForm(f => ({ ...f, target_delivery_date: e.target.value }))} />
+          </div>
+          <div className="prod-field prod-field--full">
+            <label htmlFor="ord-cutting-master" className="prod-label">✂️ Assign Cutting Master (Optional)</label>
+            <select
+              id="ord-cutting-master"
+              className="prod-input"
+              value={form.assigned_cutting_master_id}
+              onChange={e => setForm(f => ({ ...f, assigned_cutting_master_id: e.target.value }))}
+            >
+              <option value="">— Unassigned (assign later) —</option>
+              {cuttingMasters.map(emp => (
+                <option key={emp.id} value={emp.id}>{emp.full_name}</option>
+              ))}
+            </select>
+            {form.assigned_cutting_master_id && (
+              <p className="prod-field-hint">📲 A push notification will be sent to this worker when the order is created.</p>
+            )}
           </div>
           <div className="prod-field prod-field--full" style={{ flexDirection: 'row', alignItems: 'center', gap: '0.5rem' }}>
             <input id="ord-urgent" type="checkbox" checked={form.is_urgent} onChange={e => setForm(f => ({ ...f, is_urgent: e.target.checked }))} />

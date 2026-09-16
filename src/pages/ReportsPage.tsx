@@ -66,9 +66,42 @@ export function ReportsPage() {
           <h1 className="rep-title">📊 Executive Reports & Analytics</h1>
           <p className="rep-subtitle">Sales Volume, Production Pipeline Throughput & Dues Portfolio</p>
         </div>
-        <button className="rep-btn rep-btn--secondary" onClick={loadReports}>
-          🔄 Refresh Metrics
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <QuickExportCluster
+            onExport={(format) => {
+              if (!data) return;
+              const today = new Date().toISOString().split('T')[0];
+              exportDataset(format, {
+                filename: `Executive_Report_${today}`,
+                title: 'Executive Operational & Financial Report',
+                subtitle: 'Executive Summary of Sales, Pipeline Throughput & Financial Balances',
+                headers: ['Metric / KPI Area', 'Current Value', 'Category'],
+                rows: [
+                  ['Today Sales Volume', formatCurrency(data.sales_today), 'Sales'],
+                  ['Weekly Sales Volume', formatCurrency(data.sales_this_week), 'Sales'],
+                  ['Customer Dues (Receivables)', formatCurrency(data.total_customer_dues), 'Receivables'],
+                  ['Supplier Dues (Payables)', formatCurrency(data.total_supplier_dues), 'Payables'],
+                  ['Total Garments in Pipeline', `${data.total_pieces_in_pipeline} pieces`, 'Production'],
+                  ...Object.entries(STAGE_LABELS).map(([k, label]) => [
+                    `Stage: ${label}`,
+                    `${data.production_stage_counts[k] || 0} pcs`,
+                    'Production Stage',
+                  ]),
+                ],
+                summaryStats: {
+                  'Today Sales': formatCurrency(data.sales_today),
+                  'Weekly Sales': formatCurrency(data.sales_this_week),
+                  'Total Outstanding Receivables': formatCurrency(data.total_customer_dues),
+                  'Total Supplier Payables': formatCurrency(data.total_supplier_dues),
+                  'Pipeline Total Output': `${data.total_pieces_in_pipeline} pcs`,
+                },
+              });
+            }}
+          />
+          <button className="rep-btn rep-btn--secondary" onClick={loadReports}>
+            🔄 Refresh Metrics
+          </button>
+        </div>
       </div>
 
       {/* ── Sales Performance Row ── */}

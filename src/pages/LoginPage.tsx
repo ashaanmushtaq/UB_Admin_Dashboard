@@ -3,18 +3,26 @@ import { signIn } from '../lib/auth';
 import { checkSupabaseConnection } from '../lib/supabase';
 import './LoginPage.css';
 import { ThemeToggle } from '../lib/theme';
+import karobitMark from '../assets/karobit-mark.png';
 
 interface LoginPageProps {
   onSuccess: () => void;
+  initialNotice?: string | null;
 }
 
-export function LoginPage({ onSuccess }: LoginPageProps) {
+export function LoginPage({ onSuccess, initialNotice }: LoginPageProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+  const [error, setError] = useState(initialNotice ?? '');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [connectionMsg, setConnectionMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (initialNotice) {
+      setError(initialNotice);
+    }
+  }, [initialNotice]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -61,21 +69,15 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
         {/* Brand Header */}
         <div className="login-brand">
           <div className="login-logo" aria-hidden="true">
-            <svg width="36" height="36" viewBox="0 0 36 36" fill="none">
-              <rect width="36" height="36" rx="10" fill="url(#logoGrad)" />
-              <path d="M9 27L12 9H24L27 27" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
-              <path d="M11 18H25" stroke="white" strokeWidth="2" strokeLinecap="round"/>
-              <defs>
-                <linearGradient id="logoGrad" x1="0" y1="0" x2="36" y2="36" gradientUnits="userSpaceOnUse">
-                  <stop offset="0%" stopColor="#4f8ef7"/>
-                  <stop offset="100%" stopColor="#2563eb"/>
-                </linearGradient>
-              </defs>
-            </svg>
+            <img
+              src={karobitMark}
+              alt="Karobit"
+              style={{ width: '42px', height: '42px', objectFit: 'contain' }}
+            />
           </div>
           <div>
-            <h1 className="login-brand-name">Wholesale ERP</h1>
-            <p className="login-brand-tagline">Shop Management Portal</p>
+            <h1 className="login-brand-name">Karobit</h1>
+            <p className="login-brand-tagline">Powering Smarter Businesses.</p>
           </div>
         </div>
 
@@ -85,7 +87,7 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
         <form id="login-form" onSubmit={handleSubmit} noValidate>
           <h2 className="login-heading">Sign in to your account</h2>
           <p className="login-subheading">
-            Manage your garments wholesale ERP system
+            Access your business dashboard and operations portal
           </p>
 
           {connectionMsg && (

@@ -1,6 +1,13 @@
 import { useEffect, useState, useRef } from 'react';
 import type { User } from '@supabase/supabase-js';
-import { onAuthStateChange, getProfile, isSuperAdmin, getTenantBranding } from './lib/auth';
+import {
+  onAuthStateChange,
+  getProfile,
+  isSuperAdmin,
+  getTenantBranding,
+  ALLOWED_ADMIN_ROLES,
+  MOBILE_ONLY_REDIRECT_MESSAGE,
+} from './lib/auth';
 import type { UserProfile, TenantBranding } from './lib/auth';
 import { supabase } from './lib/supabase';
 import { LoginPage } from './pages/LoginPage';
@@ -14,22 +21,35 @@ export function App() {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [branding, setBranding] = useState<TenantBranding | null>(null);
+  const [roleNotice, setRoleNotice] = useState<string | null>(null);
   const resolvedRef = useRef(false);
 
-  async function loadUserData(u: User) {
+  async function loadUserData(u: User): Promise<boolean> {
     try {
       const p = await getProfile(u);
+      if (!p || !ALLOWED_ADMIN_ROLES.includes(p.role as any)) {
+        await supabase.auth.signOut();
+        setProfile(null);
+        setBranding(null);
+        setUser(null);
+        setAuthState('unauthenticated');
+        setRoleNotice(MOBILE_ONLY_REDIRECT_MESSAGE);
+        return false;
+      }
       setProfile(p);
+      setRoleNotice(null);
       if (p?.tenant_id) {
         const b = await getTenantBranding(p.tenant_id);
         setBranding(b);
       } else {
         setBranding(null);
       }
+      return true;
     } catch (err) {
       console.warn('[Auth] loadUserData encountered error:', err);
       setProfile(null);
       setBranding(null);
+      return false;
     }
   }
 
@@ -61,10 +81,11 @@ export function App() {
             if (isSuper) {
               setProfile(null);
               setBranding(null);
+              setRoleNotice(null);
               setAuthState('super_admin');
             } else {
-              await loadUserData(session.user);
-              setAuthState('authenticated');
+              const allowed = await loadUserData(session.user);
+              if (allowed) setAuthState('authenticated');
             }
           } catch (err) {
             console.warn('[Auth] Session resolution error:', err);
@@ -96,10 +117,11 @@ export function App() {
           if (isSuper) {
             setProfile(null);
             setBranding(null);
+            setRoleNotice(null);
             setAuthState('super_admin');
           } else {
-            await loadUserData(u);
-            setAuthState('authenticated');
+            const allowed = await loadUserData(u);
+            if (allowed) setAuthState('authenticated');
           }
         } catch (err) {
           console.warn('[Auth] onAuthStateChange resolution error:', err);
@@ -127,10 +149,11 @@ export function App() {
         if (isSuper) {
           setProfile(null);
           setBranding(null);
+          setRoleNotice(null);
           setAuthState('super_admin');
         } else {
-          await loadUserData(session.user);
-          setAuthState('authenticated');
+          const allowed = await loadUserData(session.user);
+          if (allowed) setAuthState('authenticated');
         }
       }
     } catch (err) {
@@ -143,7 +166,7 @@ export function App() {
   }
 
   if (authState === 'unauthenticated' || !user) {
-    return <LoginPage onSuccess={handleLoginSuccess} />;
+    return <LoginPage onSuccess={handleLoginSuccess} initialNotice={roleNotice} />;
   }
 
   if (authState === 'super_admin') {

@@ -13,6 +13,11 @@ import { AnalyticsPage } from './AnalyticsPage';
 import { NotificationsInboxPage } from './NotificationsInboxPage';
 import { OpeningBalancesPage } from './OpeningBalancesPage';
 import { ShopProfilePage } from './ShopProfilePage';
+import { TaxFbrPage } from './TaxFbrPage';
+import { BusinessExpensesPage } from './BusinessExpensesPage';
+import { BarcodePage } from './BarcodePage';
+import { AnnouncementsPage } from './AnnouncementsPage';
+import { SettingsPage } from './SettingsPage';
 import './DashboardPage.css';
 import { ThemeToggle } from '../lib/theme';
 
@@ -23,7 +28,25 @@ interface DashboardPageProps {
   onRefreshUserData?: () => Promise<void> | void;
 }
 
-type ActivePage = 'home' | 'fabric-ledger' | 'employees' | 'production' | 'customer-ledger' | 'finance' | 'reports' | 'analytics' | 'notifications' | 'opening-balances' | 'pos' | 'mobile-app' | 'settings';
+type ActivePage = 
+  | 'home' 
+  | 'fabric-ledger' 
+  | 'employees' 
+  | 'production' 
+  | 'customer-ledger' 
+  | 'finance' 
+  | 'reports' 
+  | 'analytics' 
+  | 'notifications' 
+  | 'opening-balances' 
+  | 'tax-fbr'
+  | 'business-expenses'
+  | 'barcodes'
+  | 'announcements'
+  | 'system-settings'
+  | 'pos' 
+  | 'mobile-app' 
+  | 'settings';
 
 const ROLE_BADGE_COLORS: Record<string, string> = {
   owner:             '#e8b84b',
@@ -43,11 +66,16 @@ const MODULES = [
   { id: 'production' as ActivePage,      label: 'Production',       icon: '⚙️', status: 'live',    desc: 'Cutting → Tailoring → Ironing → Kaj/Overlock → Packing → Dispatch' },
   { id: 'customer-ledger' as ActivePage, label: 'Customer Ledger',  icon: '📒', status: 'live',    desc: 'Bulk orders, customer dues, payment history, outstanding balances' },
   { id: 'finance' as ActivePage,         label: 'Finance P&L',      icon: '💰', status: 'live',    desc: 'Money In vs Money Out, payment method matrix & net cash flow' },
-  { id: 'reports' as ActivePage,         label: 'Reports',          icon: '📊', status: 'live',    desc: 'Sales volume, stage throughput & outstanding liabilities' },
-  { id: 'analytics' as ActivePage,       label: 'Analytics',        icon: '📈', status: 'live',    desc: 'Filterable sales, customer, and dues analytics' },
+  { id: 'tax-fbr' as ActivePage,         label: 'Tax & FBR',        icon: '🏛️', status: 'live',    desc: 'GST (17%) invoices, NTN & STRN compliance, tax returns' },
+  { id: 'business-expenses' as ActivePage, label: 'Expenses',       icon: '📊', status: 'live',    desc: 'Overhead costs: rent, electricity bills, transport, sundries' },
+  { id: 'barcodes' as ActivePage,        label: 'Barcodes',         icon: '🏷️', status: 'live',    desc: 'Generate Code128 thermal labels for products and bundles' },
+  { id: 'announcements' as ActivePage,   label: 'Announcements',    icon: '📢', status: 'live',    desc: 'Broadcast updates pinned to all worker mobile apps' },
+  { id: 'reports' as ActivePage,         label: 'Reports',          icon: '📈', status: 'live',    desc: 'Sales volume, stage throughput & outstanding liabilities' },
+  { id: 'analytics' as ActivePage,       label: 'Analytics',        icon: '📉', status: 'live',    desc: 'Filterable sales, customer, and dues analytics' },
   { id: 'notifications' as ActivePage,   label: 'Inbox',            icon: '🔔', status: 'live',    desc: 'System notifications, payment notices & due reminders' },
   { id: 'opening-balances' as ActivePage, label: 'Opening Balances',icon: '📥', status: 'live',    desc: 'One-time data migration for starting dues & fabric stock' },
   { id: 'settings' as ActivePage,        label: 'Shop Profile',     icon: '🏪', status: 'live',    desc: 'Shop branding, contact info, owner details, and security' },
+  { id: 'system-settings' as ActivePage, label: 'Settings & Info',  icon: '⚙️', status: 'live',    desc: 'System parameters, currency & Bellanix Tech partner info' },
   { id: 'pos' as ActivePage,             label: 'POS Counter',      icon: '🖥️', status: 'live',    desc: 'Offline-first shop counter PWA for walk-in customers' },
   { id: 'mobile-app' as ActivePage,      label: 'Mobile App',       icon: '📱', status: 'live',    desc: 'React Native app for production staff floor management' },
 ];
@@ -104,6 +132,11 @@ export function DashboardPage({ user, profile, branding, onRefreshUserData }: Da
 
   // Close sidebar on nav item click (mobile)
   function navigate(page: ActivePage) {
+    if (page === 'pos') {
+      window.open('https://pos-pwa.vercel.app/', '_blank', 'noopener,noreferrer');
+      setSidebarOpen(false);
+      return;
+    }
     setActivePage(page);
     setSidebarOpen(false);
   }
@@ -263,6 +296,10 @@ export function DashboardPage({ user, profile, branding, onRefreshUserData }: Da
             </svg>
             Sign out
           </button>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem', marginTop: '0.75rem', opacity: 0.65, fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+            <img src="/src/assets/karobit-mark.png" alt="" style={{ width: '13px', height: '13px', objectFit: 'contain' }} />
+            <span>Powered by <strong style={{ letterSpacing: '0.3px' }}>Karobit</strong></span>
+          </div>
         </div>
       </aside>
 
@@ -278,6 +315,16 @@ export function DashboardPage({ user, profile, branding, onRefreshUserData }: Da
           <CustomerLedgerPage />
         ) : activePage === 'finance' ? (
           <FinancePage />
+        ) : activePage === 'tax-fbr' ? (
+          <TaxFbrPage tenantId={profile?.tenant_id} />
+        ) : activePage === 'business-expenses' ? (
+          <BusinessExpensesPage />
+        ) : activePage === 'barcodes' ? (
+          <BarcodePage />
+        ) : activePage === 'announcements' ? (
+          <AnnouncementsPage authorProfileId={profile?.id} />
+        ) : activePage === 'system-settings' ? (
+          <SettingsPage tenantId={profile?.tenant_id} />
         ) : activePage === 'reports' ? (
           <ReportsPage />
         ) : activePage === 'analytics' ? (
@@ -294,7 +341,7 @@ export function DashboardPage({ user, profile, branding, onRefreshUserData }: Da
             onProfileUpdated={onRefreshUserData}
           />
         ) : (
-          <HomePage user={user} profile={profile} roleColor={roleColor} onNavigate={setActivePage} />
+          <HomePage user={user} profile={profile} roleColor={roleColor} onNavigate={navigate} />
         )}
       </main>
     </div>
@@ -329,14 +376,14 @@ function HomePage({ user, profile, roleColor, onNavigate }: {
           <div className="dash-stat-icon dash-stat-icon--blue" aria-hidden="true">🧵</div>
           <div className="dash-stat-body">
             <div className="dash-stat-label">Modules Live</div>
-            <div className="dash-stat-value">1</div>
+            <div className="dash-stat-value">{MODULES.filter(m => m.status === 'live').length}</div>
           </div>
         </div>
         <div className="dash-stat-card" role="listitem">
           <div className="dash-stat-icon dash-stat-icon--purple" aria-hidden="true">⚙️</div>
           <div className="dash-stat-body">
             <div className="dash-stat-label">Modules Coming</div>
-            <div className="dash-stat-value">5</div>
+            <div className="dash-stat-value">{MODULES.filter(m => m.status === 'coming').length}</div>
           </div>
         </div>
         <div className="dash-stat-card" role="listitem">
