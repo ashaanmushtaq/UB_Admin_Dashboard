@@ -8,6 +8,8 @@ import {
 import { fetchEmployees, ROLE_LABELS, type Employee } from '../lib/employees';
 import { fetchSuppliers, fetchFabricPurchaseSummaries, type FabricPurchaseSummary } from '../lib/fabric';
 import { formatDate } from '../lib/fabric';
+import { exportDataset } from '../lib/exportUtils';
+import { QuickExportCluster } from '../components/QuickExportCluster';
 import './ProductionPage.css';
 
 type Modal = 'none' | 'create-order' | 'advance-stage' | 'link-fabric';
@@ -98,6 +100,35 @@ export function ProductionPage() {
   const inProgressCount = orders.filter(o => o.current_stage !== 'delivered' && o.current_stage !== 'order_received').length;
   const totalPieces = orders.reduce((s, o) => s + (o.current_stage !== 'delivered' ? o.total_quantity : 0), 0);
 
+  function handleExportOrders(format: 'excel' | 'word' | 'pdf') {
+    const today = new Date().toISOString().split('T')[0];
+    const filterNote = searchQuery ? ` (filtered: "${searchQuery}")` : '';
+    const totalQty = filteredOrders.reduce((s, o) => s + (o.total_quantity || 0), 0);
+    exportDataset(format, {
+      filename: `Production_Orders_${today}`,
+      title: 'Production Orders & Pipeline Report',
+      subtitle: `Manufacturing work orders, stage progression, and consignment volumes${filterNote}`,
+      headers: ['Order #', 'Customer', 'Suit Type', 'Qty', 'Stage', 'Urgent', 'Status', 'Created'],
+      rows: filteredOrders.map(o => [
+        o.order_number,
+        o.customer_name || '—',
+        o.suit_type || 'Custom',
+        Number(o.total_quantity || 0).toLocaleString(),
+        STAGE_LABELS[o.current_stage as keyof typeof STAGE_LABELS] || o.current_stage,
+        o.is_urgent ? 'URGENT' : '—',
+        o.status ? o.status.toUpperCase() : 'IN PROGRESS',
+        new Date(o.created_at).toLocaleDateString(),
+      ]),
+      summaryStats: {
+        'Total Orders': filteredOrders.length,
+        'Total Pieces': totalQty.toLocaleString(),
+        'Urgent Orders': urgentCount,
+        'In Progress': inProgressCount,
+        'Report Date': today,
+      },
+    });
+  }
+
   return (
     <div className="prod-root">
       {/* ── Header ── */}
@@ -107,6 +138,7 @@ export function ProductionPage() {
           <p className="prod-subtitle">Track bulk order pipeline: Cutting → Tailoring → Ironing → Kaj → Packing → Dispatch</p>
         </div>
         <div className="prod-header-actions">
+          <QuickExportCluster onExport={handleExportOrders} formats={['pdf', 'excel']} />
           <div className="prod-view-toggle">
             <button
               className={`prod-toggle-btn${viewMode === 'kanban' ? ' prod-toggle-btn--active' : ''}`}

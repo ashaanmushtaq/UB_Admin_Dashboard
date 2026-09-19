@@ -8,6 +8,8 @@ import {
   type TaxReturn
 } from '../lib/taxFbr';
 import { fetchBusinessSettings, saveBusinessSettings, type BusinessSettings } from '../lib/settings';
+import { exportDataset } from '../lib/exportUtils';
+import { QuickExportCluster } from '../components/QuickExportCluster';
 import './TaxFbrPage.css';
 
 interface TaxFbrPageProps {
@@ -149,6 +151,34 @@ export function TaxFbrPage({ tenantId = '' }: TaxFbrPageProps) {
   const totalTaxable = invoices.reduce((acc, curr) => acc + (Number(curr.taxable_amount) || 0), 0);
   const totalTaxCollected = invoices.reduce((acc, curr) => acc + (Number(curr.tax_amount) || 0), 0);
 
+  function handleExportInvoices(format: 'excel' | 'word' | 'pdf') {
+    const today = new Date().toISOString().split('T')[0];
+    exportDataset(format, {
+      filename: `FBR_Tax_Invoices_${today}`,
+      title: 'FBR Sales Tax Invoice Registry',
+      subtitle: `Sales tax invoices, GST calculations (17%), NTN/STRN reporting`,
+      headers: ['Invoice #', 'Date', 'Customer', 'NTN', 'Taxable Amt (PKR)', 'Tax (17%)', 'Total (PKR)', 'Status'],
+      rows: invoices.map(i => [
+        i.invoice_number,
+        i.invoice_date || '—',
+        i.customer_name || '—',
+        i.customer_ntn || '—',
+        Number(i.taxable_amount || 0).toLocaleString(),
+        Number(i.tax_amount || 0).toLocaleString(),
+        Number(i.total_amount || 0).toLocaleString(),
+        i.fbr_invoice_number ? 'VERIFIED' : 'LOCAL',
+      ]),
+      summaryStats: {
+        'Total Invoices': invoices.length,
+        'Taxable Sales': `₨ ${totalTaxable.toLocaleString()}`,
+        'Tax Collected': `₨ ${totalTaxCollected.toLocaleString()}`,
+        'Shop NTN': settings?.ntn || 'Not Configured',
+        'STRN': settings?.strn || 'Not Configured',
+        'Report Date': today,
+      },
+    });
+  }
+
   return (
     <div className="tax-fbr-page">
       <header className="tax-fbr-header">
@@ -158,7 +188,10 @@ export function TaxFbrPage({ tenantId = '' }: TaxFbrPageProps) {
             Sales tax invoices, GST calculations (17%), NTN/STRN reporting & return filings.
           </p>
         </div>
-        <div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+          {invoices.length > 0 && activeTab === 'invoices' && (
+            <QuickExportCluster onExport={handleExportInvoices} />
+          )}
           {activeTab === 'invoices' && (
             <button className="tax-primary-btn" onClick={() => setShowInvoiceModal(true)}>
               + Generate Tax Invoice

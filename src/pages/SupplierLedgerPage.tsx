@@ -8,6 +8,8 @@ import {
   type SupplierBalance, type Supplier, type LedgerEntry,
   type FabricPurchaseSummary, type PaymentMethod, type FabricType,
 } from '../lib/fabric';
+import { exportDataset } from '../lib/exportUtils';
+import { QuickExportCluster } from '../components/QuickExportCluster';
 import './SupplierLedgerPage.css';
 
 type Modal = 'none' | 'add-supplier' | 'add-purchase' | 'add-payment';
@@ -83,6 +85,56 @@ export function SupplierLedgerPage() {
   const totalOwed = balances.reduce((s, b) => s + b.current_balance_due, 0);
   const totalPurchased = balances.reduce((s, b) => s + b.total_purchased_amount, 0);
 
+  function handleExportList(format: 'excel' | 'word' | 'pdf') {
+    const today = new Date().toISOString().split('T')[0];
+    const filterNote = searchQuery ? ` (filtered: "${searchQuery}")` : '';
+    exportDataset(format, {
+      filename: `Suppliers_Ledger_${today}`,
+      title: 'Fabric Suppliers Ledger Report',
+      subtitle: `Raw material procurement, supplier payments, and running credit liabilities${filterNote}`,
+      headers: ['Supplier Name', 'Company Name', 'Phone', 'Total Purchased (₨)', 'Total Paid (₨)', 'Payable Due (₨)'],
+      rows: filtered.map(b => [
+        b.supplier_name,
+        b.company_name || '—',
+        b.phone || '—',
+        Number(b.total_purchased_amount || 0).toLocaleString(),
+        Number(b.total_paid_amount || 0).toLocaleString(),
+        Number(b.current_balance_due || 0).toLocaleString(),
+      ]),
+      summaryStats: {
+        'Total Suppliers': filtered.length,
+        'Total Fabric Purchases': `₨ ${totalPurchased.toLocaleString()}`,
+        'Total Outstanding Payables': `₨ ${totalOwed.toLocaleString()}`,
+        'Report Date': today,
+      },
+    });
+  }
+
+  function handleExportAccount(format: 'excel' | 'word' | 'pdf') {
+    if (!selected) return;
+    const today = new Date().toISOString().split('T')[0];
+    exportDataset(format, {
+      filename: `Supplier_Account_${selected.supplier_name.replace(/\s+/g, '_')}_${today}`,
+      title: `Supplier Account Statement: ${selected.supplier_name}`,
+      subtitle: `${selected.company_name || ''} · ${selected.phone || ''}`.replace(/^\s*·\s*|\s*·\s*$/g, ''),
+      headers: ['Date', 'Type', 'Description', 'Amount (₨)', 'Reference'],
+      rows: ledger.map(e => [
+        e.transaction_date || '—',
+        e.entry_type === 'purchase' ? 'PURCHASE' : 'PAYMENT',
+        e.description || '—',
+        Number(e.amount || 0).toLocaleString(),
+        e.reference_no || '—',
+      ]),
+      summaryStats: {
+        'Supplier': selected.supplier_name,
+        'Total Purchased': `₨ ${Number(selected.total_purchased_amount).toLocaleString()}`,
+        'Total Paid': `₨ ${Number(selected.total_paid_amount).toLocaleString()}`,
+        'Balance Payable': `₨ ${Number(selected.current_balance_due).toLocaleString()}`,
+        'Statement Date': today,
+      },
+    });
+  }
+
   return (
     <div className="slp-root">
       {/* ── Header ── */}
@@ -92,6 +144,7 @@ export function SupplierLedgerPage() {
           <p className="slp-subtitle">Fabric procurement records, payments & running balances</p>
         </div>
         <div className="slp-header-actions">
+          <QuickExportCluster onExport={handleExportList} formats={['excel', 'pdf']} />
           <button id="btn-add-purchase" className="slp-btn slp-btn--secondary" onClick={() => openModal('add-purchase')}>
             + Record Fabric Receipt
           </button>
@@ -207,6 +260,9 @@ export function SupplierLedgerPage() {
                     </span>
                   </div>
                 </div>
+                {ledger.length > 0 && (
+                  <QuickExportCluster onExport={handleExportAccount} formats={['excel', 'pdf']} />
+                )}
                 <button className="slp-close-btn" onClick={closeDetail} aria-label="Close detail">✕</button>
               </div>
 

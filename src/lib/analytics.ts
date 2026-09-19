@@ -2,7 +2,7 @@ import { supabase } from './supabase';
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
-export type DatePreset = '7d' | '30d' | '90d' | 'custom';
+export type DatePreset = '7d' | '30d' | '90d' | '1y' | 'custom';
 
 export interface DateRange {
   from: string; // YYYY-MM-DD
@@ -13,6 +13,12 @@ export function presetToRange(preset: DatePreset, customRange?: DateRange): Date
   const today = new Date();
   const toStr = today.toISOString().split('T')[0];
   if (preset === 'custom' && customRange) return customRange;
+  if (preset === '1y') {
+    const from = new Date(today);
+    from.setFullYear(from.getFullYear() - 1);
+    from.setDate(from.getDate() + 1);
+    return { from: from.toISOString().split('T')[0], to: toStr };
+  }
   const days = preset === '7d' ? 7 : preset === '30d' ? 30 : 90;
   const from = new Date(today);
   from.setDate(from.getDate() - days + 1);

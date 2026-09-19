@@ -1038,3 +1038,114 @@
   accent-color: #8b5cf6;
   cursor: pointer;
 }
+
+/* ─── Worker role breakdown pills ──────────────────────────── */
+
+.sa-role-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.75rem 0 0.25rem;
+}
+
+.sa-role-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.35rem 0.75rem 0.35rem 0.55rem;
+  border-radius: 99px;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(255,255,255,0.04);
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: #cbd5e1;
+  transition: background 0.15s;
+}
+
+.sa-role-pill:hover {
+  background: rgba(255,255,255,0.07);
+}
+
+.sa-role-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.sa-role-pill-label {
+  color: #94a3b8;
+  font-weight: 400;
+}
+
+.sa-role-pill-count {
+  font-weight: 700;
+  font-size: 0.82rem;
+  min-width: 1.2ch;
+  text-align: right;
+}
+
+/* ─── Earnings analytics toolbar ───────────────────────────── */
+
+.sa-earnings-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  padding: 0.75rem 0 0.25rem;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  margin-bottom: 0.25rem;
+}
+
+.sa-earnings-granularity {
+  display: inline-flex;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.08);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.sa-gran-btn {
+  padding: 0.3rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  color: #64748b;
+  background: transparent;
+  border: none;
+  border-right: 1px solid rgba(255,255,255,0.08);
+  transition: background 0.12s, color 0.12s;
+}
+
+.sa-gran-btn:last-child {
+  border-right: none;
+}
+
+.sa-gran-btn:hover:not(.sa-gran-btn--active) {
+  background: rgba(255,255,255,0.04);
+  color: #cbd5e1;
+}
+
+.sa-gran-btn--active {
+  background: rgba(139,92,246,0.15);
+  color: #c4b5fd;
+  font-weight: 600;
+}
+
+/* ─── Earnings total stat chip ─────────────────────────────── */
+
+.sa-earnings-stat {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.65rem;
+  border-radius: 99px;
+  background: rgba(52,211,153,0.1);
+  border: 1px solid rgba(52,211,153,0.25);
+  color: #6ee7b7;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+

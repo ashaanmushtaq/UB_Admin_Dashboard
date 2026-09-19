@@ -76,6 +76,7 @@ export interface PendingEarning {
   rate_per_unit: number | null;
   description: string | null;
   order_id: string | null;
+  order_number?: string | null;
   order_stage_log_id: string | null;
   created_at: string;
 }
@@ -164,6 +165,63 @@ export async function createStaffUserAccount(payload: {
   return data.user;
 }
 
+export interface SecurityAuditLog {
+  id: string;
+  tenant_id: string | null;
+  tenant_name?: string | null;
+  actor_id: string;
+  actor_email: string;
+  actor_role: string;
+  target_user_id: string;
+  target_user_email: string | null;
+  target_user_name: string | null;
+  action: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+export async function resetWorkerPassword(payload: {
+  targetUserId: string;
+  newPassword: string;
+}): Promise<{ success: boolean; message: string; target_user: { id: string; email: string; full_name: string; role: string } }> {
+  const { data, error } = await supabase.functions.invoke('admin-reset-password', {
+    body: {
+      target_user_id: payload.targetUserId,
+      new_password: payload.newPassword,
+    },
+  });
+
+  if (error) {
+    let errorMsg = error.message;
+    if ('context' in error && (error as any).context) {
+      try {
+        const body = await (error as any).context.json();
+        if (body?.error) errorMsg = body.error;
+      } catch (_) {}
+    }
+    throw new Error(errorMsg || 'Failed to reset password');
+  }
+
+  if (data?.error) {
+    throw new Error(data.error);
+  }
+
+  return data;
+}
+
+export async function fetchSecurityAuditLogs(limit: number = 50): Promise<SecurityAuditLog[]> {
+  const { data, error } = await supabase.rpc('get_security_audit_logs', {
+    p_limit: limit,
+  });
+
+  if (error) {
+    console.warn('Failed to fetch security audit logs:', error.message);
+    return [];
+  }
+
+  return (data ?? []) as SecurityAuditLog[];
+}
+
 
 /* ─── Employee Earnings ──────────────────────────────────────────────────── */
 
@@ -242,7 +300,8 @@ export async function fetchPendingEarnings(): Promise<PendingEarning[]> {
       id, tenant_id, employee_id, earning_date, earning_type,
       amount, quantity_completed, rate_per_unit, description,
       order_id, order_stage_log_id, created_at,
-      employees!inner(full_name, role)
+      employees!inner(full_name, role),
+      production_orders(order_number)
     `)
     .eq('status', 'pending')
     .order('earning_date', { ascending: true })
@@ -261,6 +320,7 @@ export async function fetchPendingEarnings(): Promise<PendingEarning[]> {
     rate_per_unit: row.rate_per_unit != null ? Number(row.rate_per_unit) : null,
     description: row.description,
     order_id: row.order_id,
+    order_number: (row.production_orders as any)?.order_number ?? null,
     order_stage_log_id: row.order_stage_log_id,
     created_at: row.created_at,
   })) as PendingEarning[];

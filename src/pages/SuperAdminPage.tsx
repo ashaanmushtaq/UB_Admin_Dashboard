@@ -3,6 +3,7 @@ import type { User } from '@supabase/supabase-js';
 import { signOut } from '../lib/auth';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell,
+  LineChart, Line, ResponsiveContainer,
 } from 'recharts';
 import {
   listAllTenants,
@@ -10,6 +11,18 @@ import {
   createTenant,
   updateTenant,
   listTenantPayments,
+  adminListTenantUsers,
+  adminResetUserPassword,
+  fetchSuperAdminAuditLogs,
+  fetchTenantWorkerStats,
+  fetchTenantEarningsTrend,
+} from '../lib/superAdmin';
+import type {
+  TenantUser,
+  SecurityAuditLogRow,
+  TenantWorkerStat,
+  TenantEarningsTrendPoint,
+  EarningsGranularity,
 } from '../lib/superAdmin';
 import {
   fetchTenantGrowth,
@@ -30,6 +43,8 @@ import type {
   TenantPayment,
   PaymentMethod,
 } from '../lib/superAdmin';
+import { exportDataset } from '../lib/exportUtils';
+import { QuickExportCluster } from '../components/QuickExportCluster';
 import './SuperAdminPage.css';
 import { ThemeToggle } from '../lib/theme';
 import karobitMark from '../assets/karobit-mark.png';
@@ -85,7 +100,46 @@ const SA_PRESET_LABELS: Record<DatePreset, string> = {
   '7d': 'Last 7 days',
   '30d': 'Last 30 days',
   '90d': 'Last 90 days',
+  '1y': 'Last 1 year',
   custom: 'Custom range',
+};
+
+// Role display labels for worker breakdown
+const WORKER_ROLE_LABELS: Record<string, string> = {
+  owner:              'Owner',
+  shop_staff:         'Shop Staff',
+  cutting_master:     'Cutting Master',
+  tailor:             'Tailor',
+  iron_presser:       'Iron Presser',
+  packing_staff:      'Packing Staff',
+  kaj_overlock_staff: 'Kaj & Overlock',
+  driver:             'Driver',
+  helper:             'Helper',
+};
+
+// Muted, distinct role colors for worker pills
+const WORKER_ROLE_COLORS: Record<string, string> = {
+  owner:              '#e8b84b',
+  shop_staff:         '#38bdf8',
+  cutting_master:     '#a78bfa',
+  tailor:             '#34d399',
+  iron_presser:       '#fb923c',
+  packing_staff:      '#f472b6',
+  kaj_overlock_staff: '#60a5fa',
+  driver:             '#94a3b8',
+  helper:             '#6b7280',
+};
+
+const EARNINGS_GRAN_LABELS: Record<EarningsGranularity, string> = {
+  day:   'Daily',
+  month: 'Monthly',
+  year:  'Annual',
+};
+
+const EARNINGS_PRESET_DEFAULTS: Record<EarningsGranularity, DatePreset> = {
+  day:   '30d',
+  month: '1y',
+  year:  'custom',
 };
 
 function useChartWidth() {
@@ -707,15 +761,88 @@ interface TenantDetailModalProps {
   tenant: TenantRow;
   onClose: () => void;
   onEdit: (tenant: TenantRow) => void;
+  onSuccess?: (msg: string) => void;
 }
 
-function TenantDetailModal({ tenant, onClose, onEdit }: TenantDetailModalProps) {
+function TenantDetailModal({ tenant, onClose, onEdit, onSuccess }: TenantDetailModalProps) {
   const [payments, setPayments] = useState<TenantPayment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [users, setUsers] = useState<TenantUser[]>([]);
+  const [usersLoading, setUsersLoading] = useState(true);
+  const [usersError, setUsersError] = useState<string | null>(null);
+  const [resetTargetUser, setResetTargetUser] = useState<TenantUser | null>(null);
+
+  // ── Worker stats state ──
+  const [workerStats, setWorkerStats] = useState<TenantWorkerStat[]>([]);
+  const [workerStatsLoading, setWorkerStatsLoading] = useState(true);
+  const [workerStatsError, setWorkerStatsError] = useState<string | null>(null);
+
+  // ── Earnings analytics state ──
+  const [earningsTrend, setEarningsTrend] = useState<TenantEarningsTrendPoint[]>([]);
+  const [earningsLoading, setEarningsLoading] = useState(false);
+  const [earningsError, setEarningsError] = useState<string | null>(null);
+  const [earningsGran, setEarningsGran] = useState<EarningsGranularity>('month');
+  const [earningsPreset, setEarningsPreset] = useState<DatePreset>('1y');
+  const [earningsCustom, setEarningsCustom] = useState<{ from: string; to: string }>({
+    from: new Date(Date.now() - 365 * 86400000).toISOString().split('T')[0],
+    to:   new Date().toISOString().split('T')[0],
+  });
+
+  const earningsRange = presetToRange(earningsPreset, earningsCustom);
+  const earningsTotal = earningsTrend.reduce((s, p) => s + p.total_amount, 0);
+
+  const fetchWorkerStats = useCallback(async () => {
+    setWorkerStatsLoading(true);
+    setWorkerStatsError(null);
+    try {
+      setWorkerStats(await fetchTenantWorkerStats(tenant.id));
+    } catch (err: unknown) {
+      setWorkerStatsError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setWorkerStatsLoading(false);
+    }
+  }, [tenant.id]);
+
+  const loadEarnings = useCallback(async () => {
+    setEarningsLoading(true);
+    setEarningsError(null);
+    try {
+      setEarningsTrend(await fetchTenantEarningsTrend(
+        tenant.id,
+        earningsRange.from,
+        earningsRange.to,
+        earningsGran,
+      ));
+    } catch (err: unknown) {
+      setEarningsError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setEarningsLoading(false);
+    }
+  }, [tenant.id, earningsRange.from, earningsRange.to, earningsGran]);
+
+  // Switch granularity → reset to a sensible default preset
+  function handleGranChange(gran: EarningsGranularity) {
+    setEarningsGran(gran);
+    setEarningsPreset(EARNINGS_PRESET_DEFAULTS[gran]);
+  }
+
   const status = effectiveStatus(tenant);
   const days = daysUntil(tenant.subscription_end_date);
+
+  const fetchUsers = useCallback(async () => {
+    setUsersLoading(true);
+    setUsersError(null);
+    try {
+      const data = await adminListTenantUsers(tenant.id);
+      setUsers(data);
+    } catch (err: unknown) {
+      setUsersError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setUsersLoading(false);
+    }
+  }, [tenant.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -734,8 +861,57 @@ function TenantDetailModal({ tenant, onClose, onEdit }: TenantDetailModalProps) 
       }
     }
     fetchPayments();
+    fetchUsers();
+    fetchWorkerStats();
     return () => { cancelled = true; };
-  }, [tenant.id]);
+  }, [tenant.id, fetchUsers, fetchWorkerStats]);
+
+  useEffect(() => { loadEarnings(); }, [loadEarnings]);
+
+  function handleExportTenantDetail(format: 'excel' | 'word' | 'pdf') {
+    const today = new Date().toISOString().split('T')[0];
+    const totalPayments = payments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+    const workerCount = workerStats.reduce((s, w) => s + w.total_count, 0);
+    exportDataset(format, {
+      filename: `Tenant_${(tenant.name || 'shop').replace(/[^a-zA-Z0-9_-]/g, '_')}_Audit_${today}`,
+      title: `${tenant.name} — Tenant Audit & Financial Record`,
+      subtitle: `Plan: ${tenant.plan_type.toUpperCase()} · Status: ${status.toUpperCase()} · Expiry: ${tenant.subscription_end_date ? new Date(tenant.subscription_end_date).toLocaleDateString() : 'N/A'}`,
+      headers: ['Payment Date', 'Payment Method', 'Reference #', 'Notes', 'Amount (PKR)'],
+      rows: payments.map(p => [
+        p.payment_date || '—',
+        (p.payment_method || 'other').toUpperCase(),
+        p.reference_no || '—',
+        p.notes || '—',
+        Number(p.amount || 0).toLocaleString(),
+      ]),
+      summaryStats: {
+        'Shop Name': tenant.name,
+        'Owner': `${tenant.owner_name || '—'} (${tenant.owner_email || '—'})`,
+        'City': tenant.city || '—',
+        'Registered Staff': workerCount,
+        'Active System Users': users.filter(u => u.is_active).length,
+        'Subscription Status': status.toUpperCase(),
+        'Total Platform Fees Paid': `₨ ${totalPayments.toLocaleString()}`,
+        'Statement Date': today,
+      },
+      additionalTables: [
+        {
+          title: 'Registered System Users',
+          headers: ['Name', 'Email / Username', 'Role', 'Status', 'Created Date'],
+          rows: users.length > 0
+            ? users.map(u => [
+                u.full_name || '—',
+                u.email || '—',
+                WORKER_ROLE_LABELS[u.role] || u.role || '—',
+                u.is_active ? 'Active' : 'Inactive',
+                u.created_at ? new Date(u.created_at).toLocaleDateString() : '—',
+              ])
+            : [['No registered users', '—', '—', '—', '—']],
+        },
+      ],
+      shopName: 'Karobit Super Admin',
+    });
+  }
 
   return (
     <div className="sa-dialog-overlay" onClick={onClose}>
@@ -837,6 +1013,188 @@ function TenantDetailModal({ tenant, onClose, onEdit }: TenantDetailModalProps) 
           </div>
         )}
 
+        {/* ── Worker Breakdown ── */}
+        <div className="sa-payments-card" style={{ marginTop: '1.5rem' }}>
+          <div className="sa-payments-card-header">
+            <h3 className="sa-payments-card-title">
+              <span>👷</span> Workforce Breakdown
+            </h3>
+            {!workerStatsLoading && workerStats.length > 0 && (
+              <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                {workerStats[0]?.total_count ?? 0} active workers
+              </span>
+            )}
+          </div>
+
+          {workerStatsLoading ? (
+            <div className="sa-spinner-wrap" style={{ padding: '1rem 0' }}>
+              <div className="sa-spinner" aria-hidden="true" />
+              Loading workforce data…
+            </div>
+          ) : workerStatsError ? (
+            <div className="sa-error" style={{ margin: '0.5rem 0' }}>⚠ {workerStatsError}</div>
+          ) : workerStats.length === 0 ? (
+            <div style={{ padding: '0.75rem', color: '#64748b', fontSize: '0.82rem', textAlign: 'center' }}>
+              No active workers found for this shop.
+            </div>
+          ) : (
+            <div className="sa-role-pills">
+              {workerStats.map(stat => (
+                <div
+                  key={stat.role}
+                  className="sa-role-pill"
+                  style={{ borderColor: `${WORKER_ROLE_COLORS[stat.role] ?? '#6b7280'}40` }}
+                >
+                  <span
+                    className="sa-role-dot"
+                    style={{ background: WORKER_ROLE_COLORS[stat.role] ?? '#6b7280' }}
+                  />
+                  <span className="sa-role-pill-label">
+                    {WORKER_ROLE_LABELS[stat.role] ?? stat.role.replace(/_/g, ' ')}
+                  </span>
+                  <span
+                    className="sa-role-pill-count"
+                    style={{ color: WORKER_ROLE_COLORS[stat.role] ?? '#94a3b8' }}
+                  >
+                    {stat.count}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* ── Earnings Analytics ── */}
+        <div className="sa-payments-card" style={{ marginTop: '1.5rem' }}>
+          <div className="sa-payments-card-header">
+            <h3 className="sa-payments-card-title">
+              <span>📊</span> Worker Earnings Analytics
+            </h3>
+            {earningsTotal > 0 && (
+              <span className="sa-earnings-stat">
+                Rs. {earningsTotal.toLocaleString('en-PK')}
+              </span>
+            )}
+          </div>
+
+          {/* Granularity + date filter toolbar */}
+          <div className="sa-earnings-toolbar">
+            <div className="sa-earnings-granularity" role="group" aria-label="Earnings granularity">
+              {(['day', 'month', 'year'] as EarningsGranularity[]).map(g => (
+                <button
+                  key={g}
+                  type="button"
+                  className={`sa-gran-btn${earningsGran === g ? ' sa-gran-btn--active' : ''}`}
+                  onClick={() => handleGranChange(g)}
+                >
+                  {EARNINGS_GRAN_LABELS[g]}
+                </button>
+              ))}
+            </div>
+            <select
+              className="sa-select"
+              value={earningsPreset}
+              onChange={e => setEarningsPreset(e.target.value as DatePreset)}
+              aria-label="Earnings date range"
+              style={{ fontSize: '0.78rem' }}
+            >
+              {(['7d', '30d', '90d', '1y', 'custom'] as DatePreset[]).map(p => (
+                <option key={p} value={p}>{SA_PRESET_LABELS[p]}</option>
+              ))}
+            </select>
+            {earningsPreset === 'custom' && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                <input
+                  type="date"
+                  className="sa-input"
+                  value={earningsCustom.from}
+                  max={earningsCustom.to}
+                  onChange={e => setEarningsCustom(c => ({ ...c, from: e.target.value }))}
+                  style={{ fontSize: '0.78rem', padding: '0.3rem 0.6rem' }}
+                  aria-label="Earnings start date"
+                />
+                <span style={{ color: '#475569', fontSize: '0.75rem' }}>to</span>
+                <input
+                  type="date"
+                  className="sa-input"
+                  value={earningsCustom.to}
+                  min={earningsCustom.from}
+                  onChange={e => setEarningsCustom(c => ({ ...c, to: e.target.value }))}
+                  style={{ fontSize: '0.78rem', padding: '0.3rem 0.6rem' }}
+                  aria-label="Earnings end date"
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Chart */}
+          {earningsLoading ? (
+            <div className="sa-spinner-wrap" style={{ padding: '2rem 0' }}>
+              <div className="sa-spinner" aria-hidden="true" />
+              Loading earnings data…
+            </div>
+          ) : earningsError ? (
+            <div className="sa-error" style={{ margin: '0.5rem 0' }}>⚠ {earningsError}</div>
+          ) : earningsTrend.length === 0 ? (
+            <div style={{ padding: '2rem', color: '#64748b', fontSize: '0.82rem', textAlign: 'center' }}>
+              No approved earnings recorded in this period.
+            </div>
+          ) : (
+            <div style={{ width: '100%', height: 220, marginTop: '0.5rem' }}>
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart
+                  data={earningsTrend}
+                  margin={{ top: 8, right: 16, left: 0, bottom: 0 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
+                  <XAxis
+                    dataKey="period"
+                    tick={{ fill: '#64748b', fontSize: 10 }}
+                    axisLine={{ stroke: 'rgba(255,255,255,0.08)' }}
+                    tickLine={false}
+                    interval="preserveStartEnd"
+                  />
+                  <YAxis
+                    allowDecimals={false}
+                    tick={{ fill: '#64748b', fontSize: 10 }}
+                    axisLine={false}
+                    tickLine={false}
+                    width={50}
+                    tickFormatter={v => `Rs.${Number(v) >= 1000 ? (Number(v) / 1000).toFixed(0) + 'k' : v}`}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      background: '#1a2540',
+                      border: '1px solid rgba(255,255,255,0.12)',
+                      borderRadius: 8,
+                      color: '#f1f5f9',
+                      fontSize: '0.8rem',
+                    }}
+                    formatter={(val: number) => [`Rs. ${val.toLocaleString('en-PK')}`, 'Earnings']}
+                  />
+                  <Bar
+                    dataKey="total_amount"
+                    name="Earnings"
+                    fill="#8b5cf6"
+                    radius={[4, 4, 0, 0]}
+                  >
+                    {earningsTrend.map((_, i) => (
+                      <Cell
+                        key={i}
+                        fill={`hsl(${258 - i * (40 / Math.max(earningsTrend.length, 1))}, 70%, 65%)`}
+                      />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+
+          <div style={{ fontSize: '0.7rem', color: '#475569', marginTop: '0.5rem', textAlign: 'right' }}>
+            Approved earnings only · {earningsRange.from} → {earningsRange.to}
+          </div>
+        </div>
+
         {/* Payment History Section */}
         <div className="sa-payments-card">
           <div className="sa-payments-card-header">
@@ -893,23 +1251,478 @@ function TenantDetailModal({ tenant, onClose, onEdit }: TenantDetailModalProps) 
           )}
         </div>
 
+        {/* Staff & User Accounts Section */}
+        <div className="sa-payments-card" style={{ marginTop: '1.5rem' }}>
+          <div className="sa-payments-card-header">
+            <h3 className="sa-payments-card-title">
+              <span>👥</span> Staff & User Accounts
+            </h3>
+            <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
+              {users.length} {users.length === 1 ? 'user' : 'users'}
+            </span>
+          </div>
+
+          {usersLoading ? (
+            <div className="sa-spinner-wrap" style={{ padding: '1.5rem 0' }}>
+              <div className="sa-spinner" aria-hidden="true" />
+              Loading user accounts…
+            </div>
+          ) : usersError ? (
+            <div className="sa-error" style={{ margin: '0.5rem 0' }}>⚠ {usersError}</div>
+          ) : users.length === 0 ? (
+            <div style={{ padding: '1rem', color: '#64748b', fontSize: '0.82rem', textAlign: 'center' }}>
+              No user accounts found for this shop.
+            </div>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table className="sa-pmt-table">
+                <thead>
+                  <tr>
+                    <th>Full Name</th>
+                    <th>Email</th>
+                    <th>Role</th>
+                    <th>Status</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {users.map(u => (
+                    <tr key={u.user_id}>
+                      <td style={{ fontWeight: 600, color: '#f8fafc' }}>{u.full_name}</td>
+                      <td><code>{u.email}</code></td>
+                      <td>
+                        <span className={`sa-badge ${u.role === 'owner' ? 'sa-badge--active' : ''}`} style={{ textTransform: 'capitalize' }}>
+                          {u.role.replace('_', ' ')}
+                        </span>
+                      </td>
+                      <td>
+                        <span style={{ fontSize: '0.75rem', color: u.is_active ? '#34d399' : '#f87171' }}>
+                          {u.is_active ? '● Active' : '○ Inactive'}
+                        </span>
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          id={`btn-sa-reset-${u.user_id}`}
+                          className="sa-btn-edit"
+                          style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem' }}
+                          onClick={() => setResetTargetUser(u)}
+                          title="Reset password for this user"
+                        >
+                          🔑 Reset Password
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
         {/* Actions */}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1.5rem', gap: '0.75rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1.5rem', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <QuickExportCluster onExport={handleExportTenantDetail} formats={['pdf']} />
+          <div style={{ display: 'flex', gap: '0.75rem' }}>
+            <button
+              type="button"
+              className="sa-btn-edit"
+              onClick={() => {
+                onClose();
+                onEdit(tenant);
+              }}
+            >
+              ✏️ Edit Tenant
+            </button>
+            <button className="sa-btn-secondary" onClick={onClose}>
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {resetTargetUser && (
+        <SuperAdminResetModal
+          user={{
+            ...resetTargetUser,
+            tenant_name: tenant.name,
+          }}
+          onClose={() => setResetTargetUser(null)}
+          onSuccess={(msg) => {
+            if (onSuccess) onSuccess(msg);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Super Admin User Password Reset Modal ────────────────────────────────────
+
+interface SuperAdminResetModalProps {
+  user: { user_id: string; email: string; full_name: string; role: string; tenant_name?: string | null };
+  onClose: () => void;
+  onSuccess: (msg: string) => void;
+}
+
+function SuperAdminResetModal({ user, onClose, onSuccess }: SuperAdminResetModalProps) {
+  const [newPassword, setNewPassword] = useState('Karobit123!');
+  const [showPassword, setShowPassword] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function handleGenerate() {
+    const randomDigits = Math.floor(1000 + Math.random() * 9000);
+    setNewPassword(`Karobit${randomDigits}!`);
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newPassword || newPassword.trim().length < 6) {
+      setError('Password must be at least 6 characters long.');
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      await adminResetUserPassword({
+        targetUserId: user.user_id,
+        newPassword: newPassword.trim(),
+      });
+      onSuccess(`✅ Password reset successfully for ${user.full_name} (${user.email}). New password: "${newPassword.trim()}"`);
+      onClose();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to reset password');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="sa-dialog-overlay" onClick={onClose} style={{ zIndex: 120 }}>
+      <div className="sa-confirm-dialog" onClick={e => e.stopPropagation()} style={{ maxWidth: '440px' }}>
+        <div className="sa-dialog-header">
+          <div className="sa-dialog-icon">🔑</div>
+          <div className="sa-dialog-title">Reset User Password</div>
+        </div>
+
+        <form onSubmit={handleSubmit} style={{ marginTop: '1rem' }}>
+          {error && <div className="sa-error" style={{ marginBottom: '1rem' }}>⚠ {error}</div>}
+
+          <div style={{ padding: '0.75rem 1rem', background: 'rgba(255,255,255,0.04)', borderRadius: '8px', marginBottom: '1rem', border: '1px solid rgba(255,255,255,0.08)' }}>
+            <div style={{ fontWeight: 600, color: '#f8fafc' }}>{user.full_name}</div>
+            <div style={{ fontSize: '0.8rem', color: '#94a3b8' }}><code>{user.email}</code></div>
+            <div style={{ fontSize: '0.75rem', color: '#38bdf8', marginTop: '0.25rem' }}>
+              Role: <span style={{ textTransform: 'capitalize' }}>{user.role.replace('_', ' ')}</span>
+              {user.tenant_name ? ` · Shop: ${user.tenant_name}` : ''}
+            </div>
+          </div>
+
+          <div className="sa-form-group">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <label className="sa-label sa-label-required" htmlFor="sa-reset-input-pw">New Password</label>
+              <button
+                type="button"
+                onClick={handleGenerate}
+                style={{ background: 'none', border: 'none', color: '#38bdf8', fontSize: '0.75rem', cursor: 'pointer', padding: 0 }}
+              >
+                🎲 Auto-Generate
+              </button>
+            </div>
+            <div style={{ position: 'relative' }}>
+              <input
+                id="sa-reset-input-pw"
+                className="sa-input"
+                type={showPassword ? 'text' : 'password'}
+                required
+                value={newPassword}
+                onChange={e => setNewPassword(e.target.value)}
+                style={{ width: '100%', paddingRight: '4.5rem' }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(s => !s)}
+                style={{
+                  position: 'absolute',
+                  right: '8px',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  background: 'none',
+                  border: 'none',
+                  color: '#94a3b8',
+                  fontSize: '0.75rem',
+                  cursor: 'pointer',
+                }}
+              >
+                {showPassword ? 'Hide' : 'Show'}
+              </button>
+            </div>
+            <div className="sa-input-hint">
+              Sets the user's password directly in Supabase Auth.
+            </div>
+          </div>
+
+          <div className="sa-dialog-actions" style={{ marginTop: '1.5rem' }}>
+            <button type="button" className="sa-btn-secondary" onClick={onClose} disabled={loading}>
+              Cancel
+            </button>
+            <button type="submit" className="sa-btn-primary" disabled={loading}>
+              {loading ? 'Setting Password…' : '🔑 Set Password'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ─── Global Password Support & Audit Modal ────────────────────────────────────
+
+function GlobalPasswordSupportModal({
+  onClose,
+  onSuccess,
+}: {
+  onClose: () => void;
+  onSuccess: (msg: string) => void;
+}) {
+  const [tab, setTab] = useState<'users' | 'audit'>('users');
+  const [users, setUsers] = useState<TenantUser[]>([]);
+  const [auditLogs, setAuditLogs] = useState<SecurityAuditLogRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [selectedUser, setSelectedUser] = useState<TenantUser | null>(null);
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      if (tab === 'users') {
+        const u = await adminListTenantUsers();
+        setUsers(u);
+      } else {
+        const logs = await fetchSuperAdminAuditLogs(100);
+        setAuditLogs(logs);
+      }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [tab]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  const filteredUsers = users.filter(u =>
+    u.full_name.toLowerCase().includes(search.toLowerCase()) ||
+    u.email.toLowerCase().includes(search.toLowerCase()) ||
+    (u.tenant_name && u.tenant_name.toLowerCase().includes(search.toLowerCase())) ||
+    u.role.toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <div className="sa-dialog-overlay" onClick={onClose} style={{ zIndex: 100 }}>
+      <div
+        className="sa-detail-dialog"
+        onClick={e => e.stopPropagation()}
+        style={{ maxWidth: '850px', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}
+      >
+        <div className="sa-detail-header">
+          <div className="sa-detail-title-group">
+            <h2 className="sa-detail-shop-name" style={{ fontSize: '1.25rem' }}>
+              🔑 Platform User Support & Security Audit
+            </h2>
+            <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginTop: '0.2rem' }}>
+              Direct password resets and sensitive administrative action audit trail
+            </div>
+          </div>
+          <button className="sa-close-btn" onClick={onClose} aria-label="Close modal">✕</button>
+        </div>
+
+        {/* Tab navigation */}
+        <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.08)', gap: '1rem', padding: '0 1.5rem' }}>
           <button
             type="button"
-            className="sa-btn-edit"
-            onClick={() => {
-              onClose();
-              onEdit(tenant);
+            className="sa-btn-secondary"
+            style={{
+              background: 'none',
+              border: 'none',
+              borderBottom: tab === 'users' ? '2px solid #38bdf8' : '2px solid transparent',
+              borderRadius: 0,
+              padding: '0.75rem 0.5rem',
+              color: tab === 'users' ? '#f8fafc' : '#64748b',
+              fontWeight: 600,
             }}
+            onClick={() => setTab('users')}
           >
-            ✏️ Edit Tenant
+            👥 All Users & Password Reset ({users.length})
           </button>
-          <button className="sa-btn-secondary" onClick={onClose}>
+          <button
+            type="button"
+            className="sa-btn-secondary"
+            style={{
+              background: 'none',
+              border: 'none',
+              borderBottom: tab === 'audit' ? '2px solid #38bdf8' : '2px solid transparent',
+              borderRadius: 0,
+              padding: '0.75rem 0.5rem',
+              color: tab === 'audit' ? '#f8fafc' : '#64748b',
+              fontWeight: 600,
+            }}
+            onClick={() => setTab('audit')}
+          >
+            📋 Security Audit Trail ({auditLogs.length})
+          </button>
+        </div>
+
+        <div style={{ padding: '1.5rem', overflowY: 'auto', flex: 1 }}>
+          {error && <div className="sa-error" style={{ marginBottom: '1rem' }}>⚠ {error}</div>}
+
+          {tab === 'users' ? (
+            <>
+              <div style={{ marginBottom: '1rem' }}>
+                <input
+                  type="search"
+                  className="sa-input"
+                  placeholder="Search by name, email, role, or shop..."
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  style={{ width: '100%' }}
+                />
+              </div>
+
+              {loading ? (
+                <div className="sa-spinner-wrap" style={{ padding: '2rem 0' }}>
+                  <div className="sa-spinner" aria-hidden="true" />
+                  Loading platform users…
+                </div>
+              ) : filteredUsers.length === 0 ? (
+                <div style={{ padding: '2rem 0', textAlign: 'center', color: '#64748b' }}>
+                  {search ? 'No users matching your search.' : 'No users found.'}
+                </div>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table className="sa-pmt-table">
+                    <thead>
+                      <tr>
+                        <th>User Name</th>
+                        <th>Email</th>
+                        <th>Shop / Tenant</th>
+                        <th>Role</th>
+                        <th>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredUsers.map(u => (
+                        <tr key={u.user_id}>
+                          <td style={{ fontWeight: 600, color: '#f8fafc' }}>{u.full_name}</td>
+                          <td><code>{u.email}</code></td>
+                          <td>
+                            <span style={{ color: '#38bdf8' }}>{u.tenant_name || '—'}</span>
+                          </td>
+                          <td>
+                            <span className="sa-badge" style={{ textTransform: 'capitalize' }}>
+                              {u.role.replace('_', ' ')}
+                            </span>
+                          </td>
+                          <td>
+                            <button
+                              type="button"
+                              id={`btn-global-reset-${u.user_id}`}
+                              className="sa-btn-edit"
+                              style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem' }}
+                              onClick={() => setSelectedUser(u)}
+                            >
+                              🔑 Reset Password
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              {loading ? (
+                <div className="sa-spinner-wrap" style={{ padding: '2rem 0' }}>
+                  <div className="sa-spinner" aria-hidden="true" />
+                  Loading audit logs…
+                </div>
+              ) : auditLogs.length === 0 ? (
+                <div style={{ padding: '2rem 0', textAlign: 'center', color: '#64748b' }}>
+                  No security audit records logged yet.
+                </div>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table className="sa-pmt-table">
+                    <thead>
+                      <tr>
+                        <th>Timestamp</th>
+                        <th>Shop</th>
+                        <th>Affected User</th>
+                        <th>Action By</th>
+                        <th>Details</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {auditLogs.map(log => (
+                        <tr key={log.id}>
+                          <td style={{ fontSize: '0.78rem', color: '#94a3b8', whiteSpace: 'nowrap' }}>
+                            {formatDate(log.created_at)}
+                          </td>
+                          <td style={{ color: '#38bdf8' }}>
+                            {log.tenant_name || 'Platform'}
+                          </td>
+                          <td>
+                            <div style={{ fontWeight: 600, color: '#f8fafc' }}>
+                              {log.target_user_name || 'User'}
+                            </div>
+                            <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                              {log.target_user_email}
+                            </div>
+                          </td>
+                          <td>
+                            <div style={{ color: '#e2e8f0' }}>{log.actor_email}</div>
+                            <span className="sa-badge" style={{ fontSize: '0.68rem' }}>
+                              {log.actor_role}
+                            </span>
+                          </td>
+                          <td>
+                            <span className="sa-pmt-badge sa-pmt-badge--other">
+                              {log.action}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '1rem 1.5rem', borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+          <button type="button" className="sa-btn-secondary" onClick={onClose}>
             Close
           </button>
         </div>
       </div>
+
+      {selectedUser && (
+        <SuperAdminResetModal
+          user={selectedUser}
+          onClose={() => setSelectedUser(null)}
+          onSuccess={(msg) => {
+            onSuccess(msg);
+            loadData();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -1465,6 +2278,7 @@ export function SuperAdminPage({ user }: SuperAdminPageProps) {
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [selectedTenant, setSelectedTenant] = useState<TenantRow | null>(null);
   const [editingTenant, setEditingTenant] = useState<TenantRow | null>(null);
+  const [showPasswordSupport, setShowPasswordSupport] = useState<boolean>(false);
 
   // Confirm dialog state
   const [confirmDialog, setConfirmDialog] = useState<{
@@ -1537,6 +2351,34 @@ export function SuperAdminPage({ user }: SuperAdminPageProps) {
   const premiumCount   = tenants.filter(t => t.plan_type === 'premium').length;
   const totalRevenue   = tenants.reduce((sum, t) => sum + (Number(t.total_paid) || 0), 0);
 
+  function handleExportTenants(format: 'excel' | 'word' | 'pdf') {
+    const today = new Date().toISOString().split('T')[0];
+    exportDataset(format, {
+      filename: `Platform_Tenants_${today}`,
+      title: 'Karobit Platform — Tenant Directory',
+      subtitle: 'Complete overview of wholesale garment shops, subscription statuses & platform revenue',
+      headers: ['Shop Name', 'Owner', 'Contact Email', 'City', 'Plan', 'Status', 'Expiry Date', 'Total Paid (PKR)'],
+      rows: tenants.map(t => [
+        t.name || t.display_name || '—',
+        t.owner_name || '—',
+        t.owner_email || '—',
+        t.city || '—',
+        t.plan_type.toUpperCase(),
+        effectiveStatus(t).toUpperCase(),
+        t.subscription_end_date ? new Date(t.subscription_end_date).toLocaleDateString() : '—',
+        Number(t.total_paid || 0).toLocaleString(),
+      ]),
+      summaryStats: {
+        'Total Shops': tenants.length,
+        'Active Subscriptions': activeCount,
+        'Premium Shops': premiumCount,
+        'Suspended / Expired': suspendedCount + expiredCount,
+        'Total Platform Revenue': `₨ ${totalRevenue.toLocaleString()}`,
+        'Export Date': today,
+      },
+    });
+  }
+
   const confirmInfo = confirmDialog
     ? confirmDialog.action === 'suspend'
       ? {
@@ -1592,14 +2434,24 @@ export function SuperAdminPage({ user }: SuperAdminPageProps) {
               Manage every shop on the Garments Wholesale SaaS platform.
             </p>
           </div>
-          <button
-            id="btn-sa-refresh"
-            className="sa-btn-secondary"
-            onClick={load}
-            disabled={loading}
-          >
-            {loading ? '↻ Loading…' : '↻ Refresh'}
-          </button>
+          <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+            <button
+              id="btn-sa-pw-support"
+              className="sa-btn-primary"
+              onClick={() => setShowPasswordSupport(true)}
+              type="button"
+            >
+              🔑 Password Support & Audit
+            </button>
+            <button
+              id="btn-sa-refresh"
+              className="sa-btn-secondary"
+              onClick={load}
+              disabled={loading}
+            >
+              {loading ? '↻ Loading…' : '↻ Refresh'}
+            </button>
+          </div>
         </div>
 
         {/* ── Stats ── */}
@@ -1671,6 +2523,7 @@ export function SuperAdminPage({ user }: SuperAdminPageProps) {
                 </span>
               )}
             </h2>
+            <QuickExportCluster onExport={handleExportTenants} formats={['pdf', 'excel']} />
           </div>
 
           {loading ? (
@@ -1696,6 +2549,15 @@ export function SuperAdminPage({ user }: SuperAdminPageProps) {
           tenant={selectedTenant}
           onClose={() => setSelectedTenant(null)}
           onEdit={setEditingTenant}
+          onSuccess={msg => setSuccessMsg(msg)}
+        />
+      )}
+
+      {/* ── Global Password Support & Audit Modal ── */}
+      {showPasswordSupport && (
+        <GlobalPasswordSupportModal
+          onClose={() => setShowPasswordSupport(false)}
+          onSuccess={msg => setSuccessMsg(msg)}
         />
       )}
 

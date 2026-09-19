@@ -2,6 +2,8 @@ import { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { fetchReportsSummary, type ReportsData } from '../lib/finance';
 import { formatCurrency } from '../lib/fabric';
 import { STAGE_LABELS, STAGE_ICONS, STAGE_COLORS } from '../lib/production';
+import { QuickExportCluster } from '../components/QuickExportCluster';
+import { exportDataset } from '../lib/exportUtils';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell } from 'recharts';
 import './ReportsPage.css';
 
@@ -53,7 +55,7 @@ export function ReportsPage() {
 
   const pipelineData = Object.entries(STAGE_LABELS).map(([stageKey, label]) => ({
     stage: label.replace(/^\d+\.\s*/, ''),
-    pieces: data.production_stage_counts[stageKey] || 0,
+    pieces: (data.production_stage_counts || {})[stageKey] || 0,
     color: STAGE_COLORS[stageKey as keyof typeof STAGE_COLORS] || '#38bdf8',
   }));
   const hasPipelineData = pipelineData.some(stage => stage.pieces > 0);
@@ -84,7 +86,7 @@ export function ReportsPage() {
                   ['Total Garments in Pipeline', `${data.total_pieces_in_pipeline} pieces`, 'Production'],
                   ...Object.entries(STAGE_LABELS).map(([k, label]) => [
                     `Stage: ${label}`,
-                    `${data.production_stage_counts[k] || 0} pcs`,
+                    `${(data.production_stage_counts || {})[k] || 0} pcs`,
                     'Production Stage',
                   ]),
                 ],
@@ -142,7 +144,7 @@ export function ReportsPage() {
         </div>
         <div className="rep-stage-grid">
           {Object.entries(STAGE_LABELS).map(([stageKey, label]) => {
-            const count = data.production_stage_counts[stageKey] || 0;
+            const count = (data.production_stage_counts || {})[stageKey] || 0;
             const icon = STAGE_ICONS[stageKey as keyof typeof STAGE_ICONS] || '⚙️';
             const color = STAGE_COLORS[stageKey as keyof typeof STAGE_COLORS] || '#38bdf8';
             return (

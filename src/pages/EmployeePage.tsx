@@ -3,15 +3,18 @@ import {
   fetchEmployeeBalances, fetchEmployees, addEmployee, createStaffUserAccount,
   fetchEmployeeLedger, recordEmployeeEarning, recordEmployeePayment,
   fetchPendingEarnings, approveEmployeeEarning, rejectEmployeeEarning,
-  fetchNotifications, markNotificationRead,
+  fetchNotifications, markNotificationRead, resetWorkerPassword, fetchSecurityAuditLogs,
   ROLE_LABELS, ROLE_COLORS, EMPLOYMENT_TYPE_LABELS, EARNING_TYPE_LABELS, PAYMENT_TYPE_LABELS,
   type EmployeeBalance, type Employee, type EmployeeLedgerEntry, type PendingEarning,
   type Notification, type EmployeeRole, type EmploymentType, type EarningType, type PaymentType,
+  type SecurityAuditLog,
 } from '../lib/employees';
 import { PAYMENT_METHOD_LABELS, formatCurrency, formatDate, type PaymentMethod } from '../lib/fabric';
+import { exportDataset } from '../lib/exportUtils';
+import { QuickExportCluster } from '../components/QuickExportCluster';
 import './EmployeePage.css';
 
-type Modal = 'none' | 'add-employee' | 'add-earning' | 'add-payment' | 'notifications' | 'create-user' | 'pending-approvals';
+type Modal = 'none' | 'add-employee' | 'add-earning' | 'add-payment' | 'notifications' | 'create-user' | 'pending-approvals' | 'reset-password';
 
 export function EmployeePage() {
   const [balances, setBalances] = useState<EmployeeBalance[]>([]);
@@ -21,12 +24,20 @@ export function EmployeePage() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [pendingEarnings, setPendingEarnings] = useState<PendingEarning[]>([]);
   const [modal, setModal] = useState<Modal>('none');
+  const [resetTarget, setResetTarget] = useState<{ userId: string; name: string; role: EmployeeRole } | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
 
   const unreadCount = notifications.filter(n => !n.is_read).length;
+
+  useEffect(() => {
+    if (!successMsg) return;
+    const t = setTimeout(() => setSuccessMsg(''), 6000);
+    return () => clearTimeout(t);
+  }, [successMsg]);
 
   useEffect(() => { loadAll(); }, []);
 
@@ -82,6 +93,63 @@ export function EmployeePage() {
   const totalEarned = balances.reduce((s, b) => s + b.total_earned, 0);
   const totalPending = balances.reduce((s, b) => s + (b.pending_earned ?? 0), 0);
 
+  function handleExportPayroll(format: 'excel' | 'word' | 'pdf') {
+    const today = new Date().toISOString().split('T')[0];
+    const filterNote = searchQuery ? ` (filtered: "${searchQuery}")` : '';
+    const filteredEarned = filtered.reduce((s, b) => s + b.total_earned, 0);
+    const filteredPending = filtered.reduce((s, b) => s + (b.pending_earned ?? 0), 0);
+    const filteredOwed = filtered.reduce((s, b) => s + Math.max(0, b.remaining_balance), 0);
+    exportDataset(format, {
+      filename: `Payroll_Summary_${today}`,
+      title: 'Staff Payroll Summary Report',
+      subtitle: `All employee wage balances: earnings approved, wages paid, and outstanding dues${filterNote}`,
+      headers: ['Employee Name', 'Role', 'Employment Type', 'Total Earned (₨)', 'Pending (₨)', 'Total Paid (₨)', 'Balance Due (₨)'],
+      rows: filtered.map(b => [
+        b.full_name || '—',
+        ROLE_LABELS[b.role] || b.role,
+        EMPLOYMENT_TYPE_LABELS[b.employment_type as keyof typeof EMPLOYMENT_TYPE_LABELS] || b.employment_type || '—',
+        Number(b.total_earned || 0).toLocaleString(),
+        Number(b.pending_earned || 0).toLocaleString(),
+        Number(b.total_paid || 0).toLocaleString(),
+        Math.max(0, b.remaining_balance).toLocaleString(),
+      ]),
+      summaryStats: {
+        'Total Staff Members': filtered.length,
+        'Total Approved Earnings': `₨ ${filteredEarned.toLocaleString()}`,
+        'Pending Approval': `₨ ${filteredPending.toLocaleString()}`,
+        'Total Wages Outstanding': `₨ ${filteredOwed.toLocaleString()}`,
+        'Report Date': today,
+      },
+    });
+  }
+
+  function handleExportLedger(format: 'excel' | 'word' | 'pdf') {
+    if (!selected) return;
+    const today = new Date().toISOString().split('T')[0];
+    exportDataset(format, {
+      filename: `Employee_Ledger_${selected.full_name.replace(/\s+/g, '_')}_${today}`,
+      title: `Employee Account Statement: ${selected.full_name}`,
+      subtitle: `${ROLE_LABELS[selected.role] || selected.role} · ${EMPLOYMENT_TYPE_LABELS[selected.employment_type as keyof typeof EMPLOYMENT_TYPE_LABELS] || selected.employment_type || ''}`,
+      headers: ['Date', 'Type', 'Description', 'Earning (₨)', 'Payment (₨)', 'Status'],
+      rows: ledger.map(e => [
+        e.transaction_date || '—',
+        e.entry_type === 'earning' ? 'EARNING' : 'PAYMENT',
+        e.description || '—',
+        e.entry_type === 'earning' ? Number(e.debit_amount || 0).toLocaleString() : '—',
+        e.entry_type === 'payment' ? Number(e.credit_amount || 0).toLocaleString() : '—',
+        e.status ? e.status.toUpperCase() : '—',
+      ]),
+      summaryStats: {
+        'Employee': selected.full_name,
+        'Role': ROLE_LABELS[selected.role] || selected.role,
+        'Total Earned (Approved)': `₨ ${Number(selected.total_earned || 0).toLocaleString()}`,
+        'Total Paid': `₨ ${Number(selected.total_paid || 0).toLocaleString()}`,
+        'Balance Due': `₨ ${Math.max(0, selected.remaining_balance).toLocaleString()}`,
+        'Statement Date': today,
+      },
+    });
+  }
+
   return (
     <div className="emp-root">
       {/* ── Header ── */}
@@ -91,6 +159,7 @@ export function EmployeePage() {
           <p className="emp-subtitle">Staff records, wages, payments & balance tracking</p>
         </div>
         <div className="emp-header-actions">
+          <QuickExportCluster onExport={handleExportPayroll} />
           <button id="btn-notifications" className="emp-notif-btn" onClick={() => setModal('notifications')} aria-label={`Notifications (${unreadCount} unread)`}>
             🔔
             {unreadCount > 0 && <span className="emp-notif-badge" aria-hidden="true">{unreadCount}</span>}
@@ -108,6 +177,9 @@ export function EmployeePage() {
           </button>
           <button id="btn-add-employee" className="emp-btn emp-btn--secondary" onClick={() => setModal('add-employee')}>
             + Add Employee
+          </button>
+          <button id="btn-open-reset-pw" className="emp-btn emp-btn--secondary" onClick={() => { setResetTarget(null); setModal('reset-password'); }} title="Set a new login password for any staff member">
+            🔑 Reset Password
           </button>
           <button id="btn-create-user" className="emp-btn emp-btn--primary" onClick={() => setModal('create-user')}>
             🔑 Create Staff Login
@@ -142,6 +214,12 @@ export function EmployeePage() {
           </span>
         </div>
       </div>
+
+      {successMsg && (
+        <div className="emp-success-banner" style={{ background: 'rgba(34,197,94,0.12)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.3)', padding: '0.75rem 1.25rem', borderRadius: 'var(--radius-md)', fontWeight: 600 }}>
+          {successMsg}
+        </div>
+      )}
 
       {error && <div className="emp-error" role="alert">⚠️ {error}</div>}
 
@@ -240,7 +318,12 @@ export function EmployeePage() {
                   </div>
                 </div>
 
-                <button className="emp-close-btn" onClick={() => { setSelected(null); setLedger([]); }} aria-label="Close">✕</button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                  {ledger.length > 0 && (
+                    <QuickExportCluster onExport={handleExportLedger} />
+                  )}
+                  <button className="emp-close-btn" onClick={() => { setSelected(null); setLedger([]); }} aria-label="Close">✕</button>
+                </div>
               </div>
 
               {detailLoading ? (
@@ -250,6 +333,23 @@ export function EmployeePage() {
                   <div className="emp-ledger-toolbar">
                     <h3 className="emp-section-label">Transaction History</h3>
                     <div className="emp-ledger-actions">
+                      {selected.user_id && (
+                        <button
+                          id={`btn-reset-pw-${selected.employee_id}`}
+                          className="emp-btn emp-btn--sm emp-btn--secondary"
+                          onClick={() => {
+                            setResetTarget({
+                              userId: selected.user_id!,
+                              name: selected.full_name,
+                              role: selected.role,
+                            });
+                            setModal('reset-password');
+                          }}
+                          title="Reset worker password"
+                        >
+                          🔑 Reset Password
+                        </button>
+                      )}
                       <button id={`btn-earn-${selected.employee_id}`} className="emp-btn emp-btn--sm emp-btn--secondary" onClick={() => setModal('add-earning')}>
                         + Earning
                       </button>
@@ -341,6 +441,17 @@ export function EmployeePage() {
       )}
       {modal === 'create-user' && (
         <CreateUserModal employees={employees} onClose={() => setModal('none')} onSuccess={afterAction} />
+      )}
+      {modal === 'reset-password' && (
+        <ResetPasswordModal
+          employees={employees}
+          initialTarget={resetTarget}
+          onClose={() => setModal('none')}
+          onSuccess={(msg) => {
+            setSuccessMsg(msg);
+            afterAction();
+          }}
+        />
       )}
       {modal === 'pending-approvals' && (
         <PendingApprovalsModal
@@ -809,6 +920,11 @@ function PendingApprovalsModal({ earnings, onClose, onSuccess }: {
         <div className="emp-pending-meta">
           <span>📅 {formatDate(earning.earning_date)}</span>
           <span className="emp-badge emp-badge--earning">{EARNING_TYPE_LABELS[earning.earning_type as EarningType] ?? earning.earning_type}</span>
+          {earning.order_number && (
+            <span className="emp-badge" style={{ background: '#e0f2fe', color: '#0369a1', fontWeight: 600 }}>
+              📦 Order #{earning.order_number}
+            </span>
+          )}
         </div>
 
         {errors[earning.id] && (
@@ -1111,6 +1227,270 @@ function CreateUserModal({
           </button>
         </div>
       </form>
+    </ModalShell>
+  );
+}
+
+/* ─── Reset Worker Password Modal ───────────────────────────────────────── */
+function ResetPasswordModal({
+  employees,
+  initialTarget,
+  onClose,
+  onSuccess,
+}: {
+  employees: Employee[];
+  initialTarget: { userId: string; name: string; role: EmployeeRole } | null;
+  onClose: () => void;
+  onSuccess: (msg: string) => void;
+}) {
+  const staffWithAccounts = employees.filter(e => e.user_id);
+  const [selectedUserId, setSelectedUserId] = useState<string>(
+    initialTarget?.userId || staffWithAccounts[0]?.user_id || ''
+  );
+  const [newPassword, setNewPassword] = useState<string>('Garments123!');
+  const [showPassword, setShowPassword] = useState<boolean>(true);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string>('');
+  const [activeTab, setActiveTab] = useState<'reset' | 'audit'>('reset');
+  const [auditLogs, setAuditLogs] = useState<SecurityAuditLog[]>([]);
+  const [loadingAudit, setLoadingAudit] = useState<boolean>(false);
+
+  const selectedStaff = employees.find(e => e.user_id === selectedUserId);
+
+  useEffect(() => {
+    if (activeTab === 'audit') {
+      setLoadingAudit(true);
+      fetchSecurityAuditLogs(20)
+        .then(logs => setAuditLogs(logs))
+        .catch(err => console.warn('Failed to load audit logs:', err))
+        .finally(() => setLoadingAudit(false));
+    }
+  }, [activeTab]);
+
+  function handleGeneratePassword() {
+    const randomDigits = Math.floor(1000 + Math.random() * 9000);
+    setNewPassword(`Karobit${randomDigits}!`);
+  }
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (!selectedUserId) {
+      setError('Please select a staff member.');
+      return;
+    }
+    if (!newPassword || newPassword.trim().length < 6) {
+      setError('Password must be at least 6 characters long.');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+    try {
+      await resetWorkerPassword({
+        targetUserId: selectedUserId,
+        newPassword: newPassword.trim(),
+      });
+      const workerName = selectedStaff?.full_name || initialTarget?.name || 'Worker';
+      onSuccess(`✅ Password reset successfully for ${workerName}. New password: "${newPassword.trim()}"`);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to reset password');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <ModalShell title="🔑 Reset Worker Password" onClose={onClose}>
+      <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', padding: '0.5rem 1.5rem 0', gap: '1rem' }}>
+        <button
+          type="button"
+          className={`emp-tab-btn ${activeTab === 'reset' ? 'emp-tab-btn--active' : ''}`}
+          onClick={() => setActiveTab('reset')}
+          style={{
+            background: 'none',
+            border: 'none',
+            padding: '0.5rem 0.25rem',
+            borderBottom: activeTab === 'reset' ? '2px solid var(--accent)' : '2px solid transparent',
+            color: activeTab === 'reset' ? 'var(--text-primary)' : 'var(--text-muted)',
+            fontWeight: 600,
+            cursor: 'pointer',
+          }}
+        >
+          Reset Password
+        </button>
+        <button
+          type="button"
+          className={`emp-tab-btn ${activeTab === 'audit' ? 'emp-tab-btn--active' : ''}`}
+          onClick={() => setActiveTab('audit')}
+          style={{
+            background: 'none',
+            border: 'none',
+            padding: '0.5rem 0.25rem',
+            borderBottom: activeTab === 'audit' ? '2px solid var(--accent)' : '2px solid transparent',
+            color: activeTab === 'audit' ? 'var(--text-primary)' : 'var(--text-muted)',
+            fontWeight: 600,
+            cursor: 'pointer',
+          }}
+        >
+          📋 Audit Trail
+        </button>
+      </div>
+
+      {activeTab === 'reset' ? (
+        <form id="form-reset-password" onSubmit={handleSubmit}>
+          {error && <div className="emp-modal-error">⚠️ {error}</div>}
+
+          <div className="emp-field-grid">
+            <div className="emp-field emp-field--full">
+              <label htmlFor="reset-worker-select" className="emp-label">Worker Account *</label>
+              {initialTarget ? (
+                <div style={{
+                  padding: '0.75rem 1rem',
+                  background: 'var(--bg-elevated)',
+                  borderRadius: 'var(--radius-md)',
+                  border: '1px solid var(--border)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                }}>
+                  <div>
+                    <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{initialTarget.name}</div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                      Role: {ROLE_LABELS[initialTarget.role] || initialTarget.role}
+                    </div>
+                  </div>
+                  <span style={{ fontSize: '0.75rem', background: 'rgba(34,197,94,0.15)', color: '#22c55e', padding: '2px 8px', borderRadius: '4px', fontWeight: 600 }}>
+                    Active Login
+                  </span>
+                </div>
+              ) : (
+                <select
+                  id="reset-worker-select"
+                  className="emp-input"
+                  value={selectedUserId}
+                  onChange={e => setSelectedUserId(e.target.value)}
+                  required
+                >
+                  {staffWithAccounts.length === 0 ? (
+                    <option value="">No staff with active logins found</option>
+                  ) : (
+                    staffWithAccounts.map(e => (
+                      <option key={e.id} value={e.user_id!}>
+                        {e.full_name} ({ROLE_LABELS[e.role] || e.role}) — {e.email || 'linked'}
+                      </option>
+                    ))
+                  )}
+                </select>
+              )}
+            </div>
+
+            <div className="emp-field emp-field--full">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <label htmlFor="reset-new-pw" className="emp-label">New Password *</label>
+                <button
+                  type="button"
+                  onClick={handleGeneratePassword}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--accent)',
+                    fontSize: '0.75rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    padding: 0,
+                  }}
+                >
+                  🎲 Auto-Generate
+                </button>
+              </div>
+              <div style={{ position: 'relative' }}>
+                <input
+                  id="reset-new-pw"
+                  className="emp-input"
+                  type={showPassword ? 'text' : 'password'}
+                  required
+                  value={newPassword}
+                  onChange={e => setNewPassword(e.target.value)}
+                  placeholder="Min 6 characters (e.g. Garments123!)"
+                  style={{ paddingRight: '4.5rem' }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(s => !s)}
+                  style={{
+                    position: 'absolute',
+                    right: '8px',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--text-muted)',
+                    fontSize: '0.75rem',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {showPassword ? 'Hide' : 'Show'}
+                </button>
+              </div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.35rem' }}>
+                ℹ️ The worker will use this password to log into the Karobit mobile app immediately.
+              </div>
+            </div>
+          </div>
+
+          <div className="emp-modal-footer">
+            <button type="button" className="emp-btn emp-btn--ghost" onClick={onClose}>Cancel</button>
+            <button
+              id="submit-reset-password"
+              type="submit"
+              className="emp-btn emp-btn--primary"
+              disabled={loading || !selectedUserId || !newPassword || newPassword.length < 6}
+            >
+              {loading ? <><span className="emp-spinner emp-spinner--sm" />Updating Password…</> : '🔑 Set New Password'}
+            </button>
+          </div>
+        </form>
+      ) : (
+        <div style={{ padding: '1rem 1.5rem', maxHeight: '350px', overflowY: 'auto' }}>
+          {loadingAudit ? (
+            <div className="emp-loading"><span className="emp-spinner" />Loading audit records…</div>
+          ) : auditLogs.length === 0 ? (
+            <div className="emp-empty" style={{ padding: '2rem 0' }}>No password resets recorded yet for this shop.</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              {auditLogs.map(log => (
+                <div
+                  key={log.id}
+                  style={{
+                    background: 'var(--bg-elevated)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 'var(--radius-md)',
+                    padding: '0.75rem 1rem',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.25rem',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '0.85rem' }}>
+                      🔑 Reset for {log.target_user_name || log.target_user_email || 'Worker'}
+                    </span>
+                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                      {formatDate(log.created_at)}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                    Reset by: <span style={{ color: 'var(--text-primary)' }}>{log.actor_email}</span> ({log.actor_role})
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="emp-modal-footer" style={{ marginTop: '1.5rem', padding: 0 }}>
+            <button type="button" className="emp-btn emp-btn--primary" onClick={onClose}>Close</button>
+          </div>
+        </div>
+      )}
     </ModalShell>
   );
 }

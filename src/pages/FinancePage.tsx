@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { fetchFinanceOverview, type MoneyFlowSummary } from '../lib/finance';
 import { PAYMENT_METHOD_LABELS, formatCurrency, type PaymentMethod } from '../lib/fabric';
+import { exportDataset } from '../lib/exportUtils';
+import { QuickExportCluster } from '../components/QuickExportCluster';
 import './FinancePage.css';
 
 export function FinancePage() {
@@ -35,6 +37,30 @@ export function FinancePage() {
 
   const isProfitable = summary.net_cash_flow >= 0;
 
+  function handleExportFinance(format: 'excel' | 'word' | 'pdf') {
+    const today = new Date().toISOString().split('T')[0];
+    exportDataset(format, {
+      filename: `Financial_Summary_${today}`,
+      title: 'Financial Overview & Cash Flow Report',
+      subtitle: 'Wholesale revenue, raw materials procurement, worker payroll & net cash position',
+      headers: ['Cash Flow Stream', 'Direction', 'Amount (PKR)', 'Description'],
+      rows: [
+        ['Customer Wholesale Receipts', 'CASH IN (+)', Number(summary.total_money_in || 0).toLocaleString(), 'Wholesale customer sales collections'],
+        ['Fabric Supplier Payments', 'CASH OUT (-)', Number(summary.supplier_payments || 0).toLocaleString(), 'Raw material & textile procurement'],
+        ['Employee Wage Disbursements', 'CASH OUT (-)', Number(summary.employee_payments || 0).toLocaleString(), 'Approved tailor & staff wage payouts'],
+        ['Total Cash Outflow', 'CASH OUT (-)', Number(summary.total_money_out || 0).toLocaleString(), 'Combined operating disbursements'],
+        ['Net Cash Flow Position', isProfitable ? 'SURPLUS (+)' : 'DEFICIT (-)', Number(summary.net_cash_flow || 0).toLocaleString(), isProfitable ? 'Positive operating surplus' : 'Negative operating cash deficit'],
+      ],
+      summaryStats: {
+        'Total Money In': `₨ ${Number(summary.total_money_in || 0).toLocaleString()}`,
+        'Total Money Out': `₨ ${Number(summary.total_money_out || 0).toLocaleString()}`,
+        'Net Cash Flow': `₨ ${Number(summary.net_cash_flow || 0).toLocaleString()}`,
+        'Financial Health': isProfitable ? 'SURPLUS (+)' : 'DEFICIT (-)',
+        'Report Date': today,
+      },
+    });
+  }
+
   return (
     <div className="fin-root">
       {/* ── Header ── */}
@@ -43,9 +69,12 @@ export function FinancePage() {
           <h1 className="fin-title">💰 Financial Overview & P&L Summary</h1>
           <p className="fin-subtitle">Money In vs Money Out, Payment Method Breakdown & Net Cash Flow</p>
         </div>
-        <button className="fin-btn fin-btn--secondary" onClick={loadFinance}>
-          🔄 Refresh Data
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <QuickExportCluster onExport={handleExportFinance} formats={['pdf', 'excel']} />
+          <button className="fin-btn fin-btn--secondary" onClick={loadFinance}>
+            🔄 Refresh Data
+          </button>
+        </div>
       </div>
 
       {/* ── Top Summary Cards ── */}

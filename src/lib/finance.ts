@@ -14,6 +14,7 @@ export interface ReportsData {
   sales_today: number;
   sales_this_week: number;
   production_stage_counts: Record<string, number>;
+  total_pieces_in_pipeline: number;
   total_customer_dues: number;
   total_supplier_dues: number;
   total_employee_dues: number;
@@ -113,14 +114,25 @@ export async function fetchReportsSummary(): Promise<ReportsData> {
     supabase.from('v_employee_balances').select('remaining_balance'),
   ]);
 
+  if (salesTodayRes.error) console.error('Error fetching today sales:', salesTodayRes.error);
+  if (salesWeekRes.error) console.error('Error fetching weekly sales:', salesWeekRes.error);
+  if (prodRes.error) console.error('Error fetching production summaries:', prodRes.error);
+  if (custBalRes.error) console.error('Error fetching customer balances:', custBalRes.error);
+  if (supBalRes.error) console.error('Error fetching supplier balances:', supBalRes.error);
+  if (empBalRes.error) console.error('Error fetching employee balances:', empBalRes.error);
+
   const sales_today = (salesTodayRes.data || []).reduce((s, x) => s + (Number(x.total_amount) || 0), 0);
   const sales_this_week = (salesWeekRes.data || []).reduce((s, x) => s + (Number(x.total_amount) || 0), 0);
 
   const production_stage_counts: Record<string, number> = {};
+  let total_pieces_in_pipeline = 0;
   (prodRes.data || []).forEach(o => {
     const stage = o.current_stage;
-    const qty = Number(o.total_quantity) || 1;
-    production_stage_counts[stage] = (production_stage_counts[stage] || 0) + qty;
+    const qty = Number(o.total_quantity) || 0;
+    if (stage) {
+      production_stage_counts[stage] = (production_stage_counts[stage] || 0) + qty;
+    }
+    total_pieces_in_pipeline += qty;
   });
 
   const total_customer_dues = (custBalRes.data || []).reduce((s, x) => s + Math.max(0, Number(x.current_balance_due) || 0), 0);
@@ -131,6 +143,7 @@ export async function fetchReportsSummary(): Promise<ReportsData> {
     sales_today,
     sales_this_week,
     production_stage_counts,
+    total_pieces_in_pipeline,
     total_customer_dues,
     total_supplier_dues,
     total_employee_dues,

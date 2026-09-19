@@ -2,6 +2,12 @@ import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
+export interface AdditionalTable {
+  title?: string;
+  headers: string[];
+  rows: (string | number)[][];
+}
+
 export interface ExportData {
   filename: string;
   title: string;
@@ -10,12 +16,13 @@ export interface ExportData {
   rows: (string | number)[][];
   summaryStats?: Record<string, string | number>;
   shopName?: string;
+  additionalTables?: AdditionalTable[];
 }
 
 /**
  * Exports tabular data to native Microsoft Excel (.xlsx)
  */
-export function exportToExcel({ filename, title, headers, rows, summaryStats }: ExportData): void {
+export function exportToExcel({ filename, title, headers, rows, summaryStats, additionalTables }: ExportData): void {
   const wb = XLSX.utils.book_new();
 
   const sheetData: (string | number)[][] = [];
@@ -38,6 +45,20 @@ export function exportToExcel({ filename, title, headers, rows, summaryStats }: 
   sheetData.push(headers);
   for (const row of rows) {
     sheetData.push(row);
+  }
+
+  // Additional tables if available
+  if (additionalTables && additionalTables.length > 0) {
+    for (const tbl of additionalTables) {
+      sheetData.push([]);
+      if (tbl.title) {
+        sheetData.push([`--- ${tbl.title.toUpperCase()} ---`]);
+      }
+      sheetData.push(tbl.headers);
+      for (const row of tbl.rows) {
+        sheetData.push(row);
+      }
+    }
   }
 
   const ws = XLSX.utils.aoa_to_sheet(sheetData);
@@ -68,6 +89,7 @@ export function exportToWord({
   rows,
   summaryStats,
   shopName = 'Karobit Enterprise',
+  additionalTables,
 }: ExportData): void {
   let statsHtml = '';
   if (summaryStats && Object.keys(summaryStats).length > 0) {
@@ -112,6 +134,43 @@ export function exportToWord({
     )
     .join('');
 
+  let additionalTablesHtml = '';
+  if (additionalTables && additionalTables.length > 0) {
+    for (const tbl of additionalTables) {
+      const hdrs = tbl.headers
+        .map(
+          (h) =>
+            `<th style="background-color: #334155; color: #ffffff; padding: 8px 12px; text-align: left; font-size: 10pt; border: 1px solid #94a3b8;">${h}</th>`
+        )
+        .join('');
+      const rws = tbl.rows
+        .map(
+          (r, idx) => `
+        <tr style="background-color: ${idx % 2 === 0 ? '#ffffff' : '#f8fafc'};">
+          ${r
+            .map(
+              (c) =>
+                `<td style="padding: 8px 12px; font-size: 9.5pt; color: #1e293b; border: 1px solid #cbd5e1;">${c}</td>`
+            )
+            .join('')}
+        </tr>
+      `
+        )
+        .join('');
+      additionalTablesHtml += `
+        ${tbl.title ? `<h3 style="margin: 24px 0 8px 0; color: #0f172a; font-size: 13pt;">${tbl.title}</h3>` : ''}
+        <table class="data" style="margin-bottom: 20px;">
+          <thead>
+            <tr>${hdrs}</tr>
+          </thead>
+          <tbody>
+            ${rws}
+          </tbody>
+        </table>
+      `;
+    }
+  }
+
   const htmlContent = `
     <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
     <head>
@@ -153,6 +212,8 @@ export function exportToWord({
         </tbody>
       </table>
 
+      ${additionalTablesHtml}
+
       <div class="footer">
         Generated automatically by Karobit Wholesale Enterprise ERP · Bellanix Tech Platform
       </div>
@@ -184,6 +245,7 @@ export function exportToPdf({
   rows,
   summaryStats,
   shopName = 'Karobit Enterprise',
+  additionalTables,
 }: ExportData): void {
   // Use landscape if more than 5 columns
   const orientation = headers.length > 5 ? 'landscape' : 'portrait';
@@ -251,6 +313,19 @@ export function exportToPdf({
     currentY += boxHeight + 15;
   }
 
+  const pageFooter = () => {
+    const pageNumber = (doc as any).internal.getCurrentPageInfo().pageNumber;
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(148, 163, 184);
+    doc.text(
+      `Karobit ERP · Page ${pageNumber}`,
+      pageWidth / 2,
+      doc.internal.pageSize.getHeight() - 15,
+      { align: 'center' }
+    );
+  };
+
   // AutoTable render
   autoTable(doc, {
     startY: currentY,
@@ -272,20 +347,51 @@ export function exportToPdf({
     alternateRowStyles: {
       fillColor: [248, 250, 252],
     },
-    didDrawPage: (data) => {
-      // Footer page number
-      const pageNumber = (doc as any).internal.getCurrentPageInfo().pageNumber;
-      doc.setFontSize(8);
-      doc.setFont('helvetica', 'normal');
-      doc.setTextColor(148, 163, 184);
-      doc.text(
-        `Karobit ERP · Page ${pageNumber}`,
-        pageWidth / 2,
-        doc.internal.pageSize.getHeight() - 15,
-        { align: 'center' }
-      );
+    didDrawPage: () => {
+      pageFooter();
     },
   });
+
+  if (additionalTables && additionalTables.length > 0) {
+    for (const tbl of additionalTables) {
+      let nextY = (doc as any).lastAutoTable?.finalY ? (doc as any).lastAutoTable.finalY + 28 : currentY;
+      if (nextY > doc.internal.pageSize.getHeight() - 90) {
+        doc.addPage();
+        nextY = 40;
+      }
+      if (tbl.title) {
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(11);
+        doc.setTextColor(30, 41, 59);
+        doc.text(tbl.title, 30, nextY);
+        nextY += 10;
+      }
+      autoTable(doc, {
+        startY: nextY,
+        head: [tbl.headers],
+        body: tbl.rows,
+        theme: 'striped',
+        margin: { left: 30, right: 30, bottom: 40 },
+        headStyles: {
+          fillColor: [51, 65, 85],
+          textColor: [255, 255, 255],
+          fontSize: 9,
+          fontStyle: 'bold',
+          halign: 'left',
+        },
+        bodyStyles: {
+          fontSize: 8.5,
+          textColor: [15, 23, 42],
+        },
+        alternateRowStyles: {
+          fillColor: [248, 250, 252],
+        },
+        didDrawPage: () => {
+          pageFooter();
+        },
+      });
+    }
+  }
 
   doc.save(`${filename}.pdf`);
 }

@@ -7,6 +7,8 @@ import {
   type CustomerPaymentPlan, type PaymentPlanStatus,
 } from '../lib/customers';
 import { PAYMENT_METHOD_LABELS, formatCurrency, formatDate, type PaymentMethod } from '../lib/fabric';
+import { exportDataset } from '../lib/exportUtils';
+import { QuickExportCluster } from '../components/QuickExportCluster';
 import './CustomerLedgerPage.css';
 
 type Modal = 'none' | 'add-customer' | 'record-sale' | 'record-payment' | 'mark-received';
@@ -81,6 +83,59 @@ export function CustomerLedgerPage() {
   const totalReceived = balances.reduce((s, b) => s + b.total_paid_amount, 0);
   const totalDues = balances.reduce((s, b) => s + Math.max(0, b.current_balance_due), 0);
 
+  function handleExportList(format: 'excel' | 'word' | 'pdf') {
+    const today = new Date().toISOString().split('T')[0];
+    const dateRange = searchQuery ? ` (filtered: "${searchQuery}")` : '';
+    exportDataset(format, {
+      filename: `Customers_Ledger_${today}`,
+      title: 'Customer Sales & Ledger Report',
+      subtitle: `Active customer accounts, sales volume, payments & outstanding dues${dateRange}`,
+      headers: ['Customer Name', 'Shop / Company', 'Phone', 'City', 'Total Sales (₨)', 'Total Paid (₨)', 'Balance Due (₨)'],
+      rows: filtered.map(b => [
+        b.customer_name,
+        b.shop_name || b.company_name || '—',
+        b.phone || '—',
+        b.city || '—',
+        Number(b.total_sales_amount || 0).toLocaleString(),
+        Number(b.total_paid_amount || 0).toLocaleString(),
+        Number(b.current_balance_due || 0).toLocaleString(),
+      ]),
+      summaryStats: {
+        'Total Customer Accounts': filtered.length,
+        'Total Cumulative Sales': `₨ ${totalSales.toLocaleString()}`,
+        'Total Payments Collected': `₨ ${totalReceived.toLocaleString()}`,
+        'Total Outstanding Receivables': `₨ ${totalDues.toLocaleString()}`,
+        'Report Date': today,
+      },
+    });
+  }
+
+  function handleExportAccount(format: 'excel' | 'word' | 'pdf') {
+    if (!selected) return;
+    const today = new Date().toISOString().split('T')[0];
+    exportDataset(format, {
+      filename: `Customer_Account_${selected.customer_name.replace(/\s+/g, '_')}_${today}`,
+      title: `Account Statement: ${selected.customer_name}`,
+      subtitle: `${selected.shop_name || selected.company_name || ''} · ${selected.city || ''} · ${selected.phone || ''}`.replace(/^\s*·\s*|\s*·\s*$/g, ''),
+      headers: ['Date', 'Type', 'Description', 'Debit (Sales ₨)', 'Credit (Paid ₨)', 'Reference'],
+      rows: ledger.map(e => [
+        e.transaction_date || '—',
+        e.entry_type === 'sale' ? 'SALE' : 'PAYMENT',
+        e.description || '—',
+        e.entry_type === 'sale' ? Number(e.amount || 0).toLocaleString() : '—',
+        e.entry_type === 'payment' ? Number(e.amount || 0).toLocaleString() : '—',
+        e.reference_no || '—',
+      ]),
+      summaryStats: {
+        'Customer': selected.customer_name,
+        'Total Sales': `₨ ${Number(selected.total_sales_amount).toLocaleString()}`,
+        'Total Paid': `₨ ${Number(selected.total_paid_amount).toLocaleString()}`,
+        'Balance Due': `₨ ${Math.max(0, selected.current_balance_due).toLocaleString()}`,
+        'Statement Date': today,
+      },
+    });
+  }
+
   return (
     <div className="cust-root">
       {/* ── Header ── */}
@@ -90,6 +145,7 @@ export function CustomerLedgerPage() {
           <p className="cust-subtitle">Bulk order sales, payments received & customer running dues</p>
         </div>
         <div className="cust-header-actions">
+          <QuickExportCluster onExport={handleExportList} />
           <button id="btn-record-sale" className="cust-btn cust-btn--secondary" onClick={() => setModal('record-sale')}>
             + Record Bulk Sale
           </button>
@@ -197,6 +253,11 @@ export function CustomerLedgerPage() {
                   </div>
                 </div>
 
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                  {ledger.length > 0 && (
+                    <QuickExportCluster onExport={handleExportAccount} />
+                  )}
+                </div>
                 <div className="cust-detail-chips">
                   <div className="cust-chip">
                     <span className="cust-chip-label">Total Sales</span>

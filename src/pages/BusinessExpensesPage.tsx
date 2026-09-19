@@ -6,6 +6,8 @@ import {
   type BusinessExpense,
   type ExpenseCategory
 } from '../lib/expenses';
+import { exportDataset } from '../lib/exportUtils';
+import { QuickExportCluster } from '../components/QuickExportCluster';
 import './BusinessExpensesPage.css';
 
 const CATEGORY_LABELS: Record<ExpenseCategory, { label: string; icon: string }> = {
@@ -91,6 +93,31 @@ export function BusinessExpensesPage() {
   const salTotal = expenses.filter(e => e.category === 'salaries').reduce((acc, cur) => acc + Number(cur.amount), 0);
   const miscTotal = expenses.filter(e => e.category === 'miscellaneous').reduce((acc, cur) => acc + Number(cur.amount), 0);
 
+  function handleExportExpenses(format: 'excel' | 'word' | 'pdf') {
+    const today = new Date().toISOString().split('T')[0];
+    const catNote = selectedCategory !== 'all' ? ` (Category: ${CATEGORY_LABELS[selectedCategory]?.label || selectedCategory})` : '';
+    exportDataset(format, {
+      filename: `Operational_Expenses_${today}`,
+      title: 'Operational & Business Expenses Report',
+      subtitle: `Factory overheads, utilities, logistics, and sundry expenditures${catNote}`,
+      headers: ['Date', 'Category', 'Notes / Description', 'Amount (PKR)'],
+      rows: expenses.map(e => [
+        e.expense_date || '—',
+        CATEGORY_LABELS[e.category]?.label || e.category,
+        e.notes || '—',
+        Number(e.amount || 0).toLocaleString(),
+      ]),
+      summaryStats: {
+        'Total Expenses': `₨ ${totalAmount.toLocaleString()}`,
+        'Rent Overheads': `₨ ${rentTotal.toLocaleString()}`,
+        'Electricity & Utilities': `₨ ${elecTotal.toLocaleString()}`,
+        'Transport & Logistics': `₨ ${transTotal.toLocaleString()}`,
+        'Salaries & Sundries': `₨ ${(salTotal + miscTotal).toLocaleString()}`,
+        'Report Date': today,
+      },
+    });
+  }
+
   return (
     <div className="expenses-page">
       <header className="expenses-header">
@@ -100,9 +127,12 @@ export function BusinessExpensesPage() {
             Track overhead costs: factory rent, electricity bills, transport, and factory floor sundries.
           </p>
         </div>
-        <button className="tax-primary-btn" onClick={() => setShowModal(true)}>
-          + Record Expense
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <QuickExportCluster onExport={handleExportExpenses} />
+          <button className="tax-primary-btn" onClick={() => setShowModal(true)}>
+            + Record Expense
+          </button>
+        </div>
       </header>
 
       {/* Summary Cards */}
